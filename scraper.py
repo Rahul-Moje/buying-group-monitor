@@ -360,12 +360,8 @@ class BuyingGroupScraper:
                                     if self._try_livewire_api(deal, deal_id, csrf_token):
                                         return True
                                     else:
-                                        self.logger.warning(f"Livewire API failed for {deal['title']}, trying form submission...")
-                                        if self._try_form_submission(deal, deal_id, csrf_token):
-                                            return True
-                                        else:
-                                            self.logger.warning(f"All commit methods failed for {deal['title']}")
-                                            return False
+                                        self.logger.warning(f"Livewire API failed for {deal['title']}")
+                                        return False
                                 else:
                                     self.logger.warning(f"Invalid CSRF token type: {type(csrf_token)}")
                                     return False
@@ -523,7 +519,7 @@ class BuyingGroupScraper:
         try:
             self.logger.info(f"Attempting Livewire API submission for deal {deal_id}")
             
-            # Get the dashboard page to extract Livewire component ID
+            # Get the dashboard page to extract Livewire component ID and all deal IDs
             response = self.session.get(BUYING_GROUP_DASHBOARD_URL)
             response.raise_for_status()
             soup = BeautifulSoup(response.text, 'html.parser')
@@ -540,6 +536,19 @@ class BuyingGroupScraper:
             
             self.logger.info(f"Found Livewire component ID: {livewire_id}")
             
+            # Extract all deal IDs from the page
+            deal_cards = soup.find_all('div', class_='group relative flex flex-col overflow-hidden rounded-lg border border-gray-200 bg-white')
+            all_deal_ids = []
+            for card in deal_cards:
+                commit_button = card.find('button', attrs={'wire:click': re.compile(r'commit\(\d+\)')})
+                if commit_button:
+                    wire_click = commit_button.get('wire:click', '')
+                    deal_id_match = re.search(r'commit\((\d+)\)', wire_click)
+                    if deal_id_match:
+                        all_deal_ids.append(int(deal_id_match.group(1)))
+            
+            self.logger.info(f"Found {len(all_deal_ids)} deal IDs on page: {all_deal_ids}")
+            
             # Use the correct Livewire endpoint
             livewire_url = f"https://app.buyinggroup.ca/livewire/message/app.dashboard.deals"
             
@@ -554,7 +563,23 @@ class BuyingGroupScraper:
                 'x-livewire': 'true'
             }
             
-            # First, sync the input (set quantity)
+            # Create commitments object for all deals (like in your curl request)
+            commitments = {}
+            for did in all_deal_ids:
+                if str(did) == deal_id:
+                    commitments[str(did)] = {
+                        "amount": str(AUTO_COMMIT_QUANTITY),
+                        "editing": True,
+                        "max": 10  # Will be updated by server
+                    }
+                else:
+                    commitments[str(did)] = {
+                        "amount": 0,
+                        "editing": True,
+                        "max": 10
+                    }
+            
+            # First, sync the input (set quantity) - using exact structure from your curl
             sync_payload = {
                 "fingerprint": {
                     "id": livewire_id,
@@ -570,19 +595,13 @@ class BuyingGroupScraper:
                     "htmlHash": "",
                     "data": {
                         "deals": [],
-                        "commitments": {
-                            deal_id: {
-                                "amount": str(AUTO_COMMIT_QUANTITY),
-                                "editing": True,
-                                "max": 10  # Will be updated by server
-                            }
-                        }
+                        "commitments": commitments
                     },
                     "dataMeta": {
                         "modelCollections": {
                             "deals": {
                                 "class": "App\\Models\\Deal",
-                                "id": [int(deal_id)],
+                                "id": all_deal_ids,
                                 "relations": ["store", "commitments"],
                                 "connection": "mysql",
                                 "collectionClass": None
@@ -604,6 +623,7 @@ class BuyingGroupScraper:
             }
             
             self.logger.info(f"Syncing input for deal {deal_id} with quantity {AUTO_COMMIT_QUANTITY}")
+            self.logger.debug(f"Sync payload: {sync_payload}")
             sync_response = self.session.post(livewire_url, json=sync_payload, headers=headers)
             
             self.logger.info(f"Sync response status: {sync_response.status_code}")
@@ -641,7 +661,14 @@ class BuyingGroupScraper:
                 self.logger.warning(f"Could not parse sync response: {e}")
                 actual_quantity = AUTO_COMMIT_QUANTITY
             
-            # Now commit the deal
+            # Update commitments with the actual quantity
+            commitments[deal_id] = {
+                "amount": str(actual_quantity),
+                "editing": True,
+                "max": 10
+            }
+            
+            # Now commit the deal - using exact structure from your curl
             commit_payload = {
                 "fingerprint": {
                     "id": livewire_id,
@@ -657,19 +684,13 @@ class BuyingGroupScraper:
                     "htmlHash": "",
                     "data": {
                         "deals": [],
-                        "commitments": {
-                            deal_id: {
-                                "amount": str(actual_quantity),
-                                "editing": True,
-                                "max": 10
-                            }
-                        }
+                        "commitments": commitments
                     },
                     "dataMeta": {
                         "modelCollections": {
                             "deals": {
                                 "class": "App\\Models\\Deal",
-                                "id": [int(deal_id)],
+                                "id": all_deal_ids,
                                 "relations": ["store", "commitments"],
                                 "connection": "mysql",
                                 "collectionClass": None
@@ -691,6 +712,7 @@ class BuyingGroupScraper:
             }
             
             self.logger.info(f"Committing deal {deal_id} with quantity {actual_quantity}")
+            self.logger.debug(f"Commit payload: {commit_payload}")
             commit_response = self.session.post(livewire_url, json=commit_payload, headers=headers)
             
             self.logger.info(f"Commit response status: {commit_response.status_code}")
