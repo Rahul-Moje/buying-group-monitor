@@ -4,12 +4,13 @@ import json
 from datetime import datetime
 from typing import List, Dict, Optional
 from config import DATABASE_PATH
+from logger import setup_logger
 import os
 
 class DealDatabase:
     def __init__(self, db_path: str = DATABASE_PATH):
         self.db_path = db_path
-        self.logger = logging.getLogger(__name__)
+        self.logger = setup_logger('deal_database')
         self.init_database()
     
     def init_database(self):

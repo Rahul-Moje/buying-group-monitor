@@ -20,6 +20,7 @@ import hashlib
 import logging
 import traceback
 from notifier import DiscordNotifier
+from logger import setup_logger
 
 # Import urllib3 for retry strategy
 try:
@@ -35,7 +36,7 @@ class BuyingGroupScraper:
         self.session = requests.Session()
         self.session.headers.update(DEFAULT_HEADERS)
         self.is_authenticated = False
-        self.logger = logging.getLogger(__name__)
+        self.logger = setup_logger('buying_group_scraper')
         
         # Configure retry strategy
         if Retry and HTTPAdapter:
