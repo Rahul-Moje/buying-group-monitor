@@ -355,16 +355,24 @@ class BuyingGroupScraper:
                                 if livewire_component and hasattr(livewire_component, 'get') and not isinstance(livewire_component, str):
                                     livewire_id = livewire_component.get('wire:id')
                                 
-                                # Use the specific Livewire endpoint
-                                update_url = "https://buyinggroup.ca/livewire/message"
+                                # Use the correct Livewire endpoint with component ID
+                                if livewire_id:
+                                    update_url = f"https://buyinggroup.ca/livewire/message/{livewire_id}"
+                                else:
+                                    # Fallback to general endpoint
+                                    update_url = "https://buyinggroup.ca/livewire/message"
                                 
                                 self.logger.info(f"Attempting to commit deal {deal_id} with quantity {AUTO_COMMIT_QUANTITY}")
+                                self.logger.info(f"Using Livewire endpoint: {update_url}")
+                                self.logger.info(f"Livewire component ID: {livewire_id}")
                                 
                                 # Prepare Livewire message data
                                 headers = {
                                     'Content-Type': 'application/json',
                                     'X-CSRF-TOKEN': csrf_token,
-                                    'X-Requested-With': 'XMLHttpRequest'
+                                    'X-Requested-With': 'XMLHttpRequest',
+                                    'Accept': 'application/json, text/plain, */*',
+                                    'Referer': BUYING_GROUP_DASHBOARD_URL
                                 }
                                 
                                 # Create Livewire message payload
@@ -416,12 +424,20 @@ class BuyingGroupScraper:
                                     ]
                                 }
                                 
+                                # Log the request details for debugging
+                                self.logger.debug(f"Request URL: {update_url}")
+                                self.logger.debug(f"Request headers: {headers}")
+                                self.logger.debug(f"Request data: {json_data}")
+                                
                                 # First attempt with default quantity
                                 commit_response = self.session.post(
                                     update_url,
                                     json=json_data,
                                     headers=headers
                                 )
+                                
+                                self.logger.info(f"Response status: {commit_response.status_code}")
+                                self.logger.info(f"Response URL: {commit_response.url}")
                                 
                                 if commit_response.status_code == 200:
                                     # Check for "Must buy X or more" error in response
@@ -488,6 +504,33 @@ class BuyingGroupScraper:
                                     error_msg = f"Commit failed with status {commit_response.status_code} for {deal['title']}\nStack trace:\n{traceback.format_exc()}"
                                     DiscordNotifier().send_error_notification(error_msg)
                                     self.logger.warning(f"Commit failed with status {commit_response.status_code} for {deal['title']}")
+                                    
+                                    # Add detailed debugging for 404 errors
+                                    if commit_response.status_code == 404:
+                                        self.logger.error(f"404 Error Details:")
+                                        self.logger.error(f"  Request URL: {update_url}")
+                                        self.logger.error(f"  Livewire ID: {livewire_id}")
+                                        self.logger.error(f"  Deal ID: {deal_id}")
+                                        self.logger.error(f"  Response URL: {commit_response.url}")
+                                        self.logger.error(f"  Response text: {commit_response.text[:500]}")
+                                        
+                                        # Try alternative endpoint
+                                        alternative_url = "https://buyinggroup.ca/livewire/message"
+                                        if update_url != alternative_url:
+                                            self.logger.info(f"Trying alternative endpoint: {alternative_url}")
+                                            try:
+                                                alt_response = self.session.post(
+                                                    alternative_url,
+                                                    json=json_data,
+                                                    headers=headers
+                                                )
+                                                self.logger.info(f"Alternative response status: {alt_response.status_code}")
+                                                if alt_response.status_code == 200:
+                                                    self.logger.info("Alternative endpoint succeeded!")
+                                                    return True
+                                            except Exception as alt_e:
+                                                self.logger.error(f"Alternative endpoint failed: {alt_e}")
+                                    
                                     return False
                             else:
                                 error_msg = f"Could not find CSRF token for commit for {deal['title']}\nStack trace:\n{traceback.format_exc()}"
