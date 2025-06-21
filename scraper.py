@@ -460,8 +460,6 @@ class BuyingGroupScraper:
                                                 break
                                         
                                         if min_qty and min_qty > AUTO_COMMIT_QUANTITY:
-                                            error_msg = f"Auto-commit failed for {deal['title']}: Must buy at least {min_qty}. Retrying with {min_qty}.\nStack trace:\n{traceback.format_exc()}"
-                                            DiscordNotifier().send_error_notification(error_msg)
                                             self.logger.warning(f"Auto-commit failed for {deal['title']}: Must buy at least {min_qty}. Retrying with {min_qty}.")
                                             
                                             # Retry with the correct minimum quantity
@@ -477,33 +475,22 @@ class BuyingGroupScraper:
                                                 retry_text = commit_response2.text.lower()
                                                 if "must buy" not in retry_text and "error" not in retry_text:
                                                     success_msg = f"Auto-commit succeeded for {deal['title']} with quantity {min_qty}"
-                                                    DiscordNotifier().send_warning_notification(success_msg)
                                                     self.logger.info(success_msg)
                                                     return True
                                                 else:
-                                                    error_msg = f"Auto-commit retry failed for {deal['title']} with quantity {min_qty}. Response: {retry_text[:200]}\nStack trace:\n{traceback.format_exc()}"
-                                                    DiscordNotifier().send_error_notification(error_msg)
                                                     self.logger.warning(f"Auto-commit retry failed for {deal['title']} with quantity {min_qty}. Response: {retry_text[:200]}")
                                                     return False
                                             else:
-                                                error_msg = f"Auto-commit retry failed with status {commit_response2.status_code} for {deal['title']}\nStack trace:\n{traceback.format_exc()}"
-                                                DiscordNotifier().send_error_notification(error_msg)
                                                 self.logger.warning(f"Auto-commit retry failed with status {commit_response2.status_code} for {deal['title']}")
                                                 return False
                                         else:
-                                            error_msg = f"Auto-commit failed for {deal['title']}: Could not determine minimum quantity from response: {response_text[:200]}\nStack trace:\n{traceback.format_exc()}"
-                                            DiscordNotifier().send_error_notification(error_msg)
                                             self.logger.warning(f"Auto-commit failed for {deal['title']}: Could not determine minimum quantity from response: {response_text[:200]}")
                                             return False
                                     else:
                                         # No "Must buy" error, commit was successful
-                                        success_msg = f"Auto-commit succeeded for {deal['title']} with quantity {AUTO_COMMIT_QUANTITY}"
-                                        DiscordNotifier().send_warning_notification(success_msg)
-                                        self.logger.info(success_msg)
+                                        self.logger.info(f"Auto-commit succeeded for {deal['title']} with quantity {AUTO_COMMIT_QUANTITY}")
                                         return True
                                 else:
-                                    error_msg = f"Commit failed with status {commit_response.status_code} for {deal['title']}\nStack trace:\n{traceback.format_exc()}"
-                                    DiscordNotifier().send_error_notification(error_msg)
                                     self.logger.warning(f"Commit failed with status {commit_response.status_code} for {deal['title']}")
                                     
                                     # Add detailed debugging for 404 errors
@@ -534,13 +521,9 @@ class BuyingGroupScraper:
                                     
                                     return False
                             else:
-                                error_msg = f"Could not find CSRF token for commit for {deal['title']}\nStack trace:\n{traceback.format_exc()}"
-                                DiscordNotifier().send_error_notification(error_msg)
                                 self.logger.warning(f"Could not find CSRF token for commit for {deal['title']}")
                                 return False
                         else:
-                            error_msg = f"Could not extract deal ID from wire:click for {deal['title']}\nStack trace:\n{traceback.format_exc()}"
-                            DiscordNotifier().send_error_notification(error_msg)
                             self.logger.warning(f"Could not extract deal ID from wire:click for {deal['title']}")
                             return False
                     else:
@@ -549,18 +532,12 @@ class BuyingGroupScraper:
                             self.logger.info(f"Deal {deal['title']} is already committed, skipping auto-commit")
                             return True  # Already committed, consider this a success
                         else:
-                            error_msg = f"Could not find commit button with wire:click for deal {deal['title']}\nStack trace:\n{traceback.format_exc()}"
-                            DiscordNotifier().send_error_notification(error_msg)
                             self.logger.warning(f"Could not find commit button with wire:click for deal {deal['title']}")
                             return False
             
-            error_msg = f"Could not find deal card for: {deal['title']}\nStack trace:\n{traceback.format_exc()}"
-            DiscordNotifier().send_error_notification(error_msg)
             self.logger.warning(f"Could not find deal card for: {deal['title']}")
             return False
             
         except Exception as e:
-            error_msg = f"Error during auto-commit for {deal.get('title', 'Unknown')}: {e}\nStack trace:\n{traceback.format_exc()}"
-            DiscordNotifier().send_error_notification(error_msg)
             self.logger.error(f"Error during auto-commit for {deal.get('title', 'Unknown')}: {e}")
             return False 
