@@ -39,8 +39,9 @@ class BuyingGroupMonitor:
                     # This is a new deal
                     self.database.add_deal(deal)
                     new_deals.append(deal)
-                    print(f"New deal found: {deal['title']}")
+                    print(f"New deal found: {deal['title']} (ID: {deal['deal_id']})")
                 else:
+                    print(f"Existing deal found: {deal['title']} (ID: {deal['deal_id']})")
                     # Check if quantity has changed (deal availability)
                     if existing_deal['current_quantity'] != deal['current_quantity']:
                         old_quantity = existing_deal['current_quantity']
@@ -66,8 +67,13 @@ class BuyingGroupMonitor:
             
             # Send notifications for new deals
             if new_deals:
-                if not self.database.has_notification_been_sent(new_deals[0]['deal_id'], 'new_deal'):
+                # Check if we've already sent a notification for this batch
+                # Use the first deal's ID as a batch identifier
+                batch_id = f"new_deals_batch_{new_deals[0]['deal_id']}"
+                if not self.database.has_notification_been_sent(batch_id, 'new_deal_batch'):
                     self.notifier.send_new_deals_notification(new_deals)
+                    self.database.mark_notification_sent(batch_id, 'new_deal_batch')
+                    # Also mark individual deals as notified
                     for deal in new_deals:
                         self.database.mark_notification_sent(deal['deal_id'], 'new_deal')
             

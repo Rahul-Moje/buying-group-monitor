@@ -9,6 +9,7 @@ from config import (
     PASSWORD, 
     DEFAULT_HEADERS
 )
+import hashlib
 
 class BuyingGroupScraper:
     def __init__(self):
@@ -191,7 +192,9 @@ class BuyingGroupScraper:
                 delivery_date = delivery_match.group(1).strip()
             
             # Generate unique deal ID from title and store
-            deal_id = f"{store}_{title[:50]}_{price}".replace(" ", "_").replace("/", "_")
+            # Use a more stable ID generation to avoid duplicates
+            deal_text = f"{store}_{title}".lower().strip()
+            deal_id = hashlib.md5(deal_text.encode()).hexdigest()[:16]
             
             return {
                 'deal_id': deal_id,
