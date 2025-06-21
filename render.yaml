@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: buying-group-monitor
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python main.py start
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.9.0
+    healthCheckPath: /health
+    autoDeploy: true 
