@@ -314,22 +314,22 @@ class BuyingGroupScraper:
                         store = store_text.split("From:")[1].strip()
                 
                 if title == deal['title'] and store == deal['store']:
-                    # Look for the new form structure with wire:model.lazy attributes
-                    amount_input = card.find('input', attrs={'wire:model.lazy': re.compile(r'commitments\.\d+\.amount')})
+                    # Look for the commit button with wire:click attribute
+                    commit_button = card.find('button', attrs={'wire:click': re.compile(r'commit\(\d+\)')})
                     
-                    if amount_input:
-                        # Extract the deal ID from the wire:model.lazy attribute
-                        wire_model = amount_input.get('wire:model.lazy', '')
-                        deal_id_match = re.search(r'commitments\.(\d+)\.amount', wire_model)
+                    if commit_button:
+                        # Extract the deal ID from the wire:click attribute
+                        wire_click = commit_button.get('wire:click', '')
+                        deal_id_match = re.search(r'commit\((\d+)\)', wire_click)
                         
                         if deal_id_match:
                             deal_id = deal_id_match.group(1)
                             self.logger.info(f"Found deal ID {deal_id} for {deal['title']}")
                             
-                            # Get CSRF token from page
+                            # Get CSRF token from page meta tag
                             csrf_token = None
                             csrf_meta = soup.find('meta', {'name': 'csrf-token'})
-                            if csrf_meta:
+                            if csrf_meta and hasattr(csrf_meta, 'get') and not isinstance(csrf_meta, str):
                                 csrf_token = csrf_meta.get('content')
                             
                             if not csrf_token:
@@ -339,249 +339,160 @@ class BuyingGroupScraper:
                                     csrf_token = csrf_input.get('value')
                             
                             if csrf_token:
-                                # Prepare the commit data for Livewire
-                                commit_data = {
-                                    '_token': csrf_token,
-                                    'commitments': {
-                                        deal_id: {
-                                            'amount': AUTO_COMMIT_QUANTITY
-                                        }
-                                    }
-                                }
-                                
-                                # Try to find the Livewire update endpoint
-                                # Look for any Livewire-related scripts or data attributes
+                                # Find the Livewire component ID from the deals section
+                                livewire_component = soup.find('div', attrs={'wire:id': True})
                                 livewire_id = None
-                                livewire_elem = card.find(attrs={'wire:id': True})
-                                if livewire_elem:
-                                    livewire_id = livewire_elem.get('wire:id')
+                                if livewire_component and hasattr(livewire_component, 'get') and not isinstance(livewire_component, str):
+                                    livewire_id = livewire_component.get('wire:id')
                                 
-                                # If we can't find a specific Livewire ID, try the general update endpoint
-                                if livewire_id:
-                                    update_url = f"https://buyinggroup.ca/livewire/message/{livewire_id}"
-                                else:
-                                    # Try to find the form action or use a general endpoint
-                                    form = card.find('form')
-                                    if form and form.get('action'):
-                                        update_url = form.get('action')
-                                        if not update_url.startswith('http'):
-                                            update_url = f"https://buyinggroup.ca{update_url}"
-                                    else:
-                                        # Use a general Livewire update endpoint
-                                        update_url = "https://buyinggroup.ca/livewire/update"
+                                # Use the specific Livewire endpoint
+                                update_url = "https://buyinggroup.ca/livewire/message"
                                 
                                 self.logger.info(f"Attempting to commit deal {deal_id} with quantity {AUTO_COMMIT_QUANTITY}")
                                 
-                                # First attempt with default quantity
+                                # Prepare Livewire message data
                                 headers = {
                                     'Content-Type': 'application/json',
                                     'X-CSRF-TOKEN': csrf_token,
                                     'X-Requested-With': 'XMLHttpRequest'
                                 }
                                 
-                                # Try JSON format first (Livewire standard)
-                                try:
-                                    json_data = {
-                                        'fingerprint': {
-                                            'id': livewire_id or 'commitment-form',
-                                            'name': 'commitment-form',
-                                            'locale': 'en',
-                                            'path': '/dashboard',
-                                            'method': 'GET'
-                                        },
-                                        'serverMemo': {
-                                            'children': [],
-                                            'errors': {},
-                                            'htmlHash': '',
-                                            'data': {
-                                                'commitments': {
-                                                    deal_id: {
-                                                        'amount': AUTO_COMMIT_QUANTITY
-                                                    }
-                                                }
-                                            },
-                                            'dataMeta': [],
-                                            'checksum': ''
-                                        },
-                                        'updates': [
-                                            {
-                                                'type': 'callMethod',
-                                                'payload': {
-                                                    'id': f'commitment-{deal_id}',
-                                                    'method': 'updateCommitment',
-                                                    'params': [deal_id, AUTO_COMMIT_QUANTITY]
+                                # Create Livewire message payload
+                                json_data = {
+                                    'fingerprint': {
+                                        'id': livewire_id or 'Hy2SMEBM7YAQ3sHJyzo9',
+                                        'name': 'app.dashboard.deals',
+                                        'locale': 'en',
+                                        'path': '/',
+                                        'method': 'GET',
+                                        'v': 'acj'
+                                    },
+                                    'serverMemo': {
+                                        'children': [],
+                                        'errors': {},
+                                        'htmlHash': '',
+                                        'data': {
+                                            'deals': [],
+                                            'commitments': {
+                                                deal_id: {
+                                                    'amount': AUTO_COMMIT_QUANTITY,
+                                                    'editing': True,
+                                                    'max': 10  # Default max, will be updated by server
                                                 }
                                             }
+                                        },
+                                        'dataMeta': {
+                                            'modelCollections': {
+                                                'deals': {
+                                                    'class': 'App\\Models\\Deal',
+                                                    'id': [int(deal_id)],
+                                                    'relations': ['store', 'commitments'],
+                                                    'connection': 'mysql',
+                                                    'collectionClass': None
+                                                }
+                                            }
+                                        },
+                                        'checksum': ''
+                                    },
+                                    'updates': [
+                                        {
+                                            'type': 'callMethod',
+                                            'payload': {
+                                                'id': f'commit-{deal_id}',
+                                                'method': 'commit',
+                                                'params': [int(deal_id)]
+                                            }
+                                        }
+                                    ]
+                                }
+                                
+                                # First attempt with default quantity
+                                commit_response = self.session.post(
+                                    update_url,
+                                    json=json_data,
+                                    headers=headers
+                                )
+                                
+                                if commit_response.status_code == 200:
+                                    # Check for "Must buy X or more" error in response
+                                    response_text = commit_response.text.lower()
+                                    if "must buy" in response_text and "or more" in response_text:
+                                        # Extract minimum quantity and retry
+                                        patterns = [
+                                            r'must buy (\d+) or more',
+                                            r'minimum (\d+)',
+                                            r'at least (\d+)',
+                                            r'buy (\d+) or more'
                                         ]
-                                    }
-                                    
-                                    commit_response = self.session.post(
-                                        update_url,
-                                        json=json_data,
-                                        headers=headers
-                                    )
-                                    
-                                    if commit_response.status_code == 200:
-                                        # Check for "Must buy X or more" error in response
-                                        response_text = commit_response.text.lower()
-                                        if "must buy" in response_text and "or more" in response_text:
-                                            # Extract minimum quantity and retry
-                                            patterns = [
-                                                r'must buy (\d+) or more',
-                                                r'minimum (\d+)',
-                                                r'at least (\d+)',
-                                                r'buy (\d+) or more'
-                                            ]
-                                            
-                                            min_qty = None
-                                            for pattern in patterns:
-                                                match = re.search(pattern, response_text)
-                                                if match:
-                                                    min_qty = int(match.group(1))
-                                                    break
-                                            
-                                            if min_qty and min_qty > AUTO_COMMIT_QUANTITY:
-                                                error_msg = f"Auto-commit failed for {deal['title']}: Must buy at least {min_qty}. Retrying with {min_qty}.\nStack trace:\n{traceback.format_exc()}"
-                                                DiscordNotifier().send_error_notification(error_msg)
-                                                self.logger.warning(f"Auto-commit failed for {deal['title']}: Must buy at least {min_qty}. Retrying with {min_qty}.")
-                                                
-                                                # Retry with the correct minimum quantity
-                                                json_data['serverMemo']['data']['commitments'][deal_id]['amount'] = min_qty
-                                                json_data['updates'][0]['payload']['params'][1] = min_qty
-                                                
-                                                commit_response2 = self.session.post(
-                                                    update_url,
-                                                    json=json_data,
-                                                    headers=headers
-                                                )
-                                                
-                                                if commit_response2.status_code == 200:
-                                                    retry_text = commit_response2.text.lower()
-                                                    if "must buy" not in retry_text and "error" not in retry_text:
-                                                        success_msg = f"Auto-commit succeeded for {deal['title']} with quantity {min_qty}"
-                                                        DiscordNotifier().send_warning_notification(success_msg)
-                                                        self.logger.info(success_msg)
-                                                        return True
-                                                    else:
-                                                        error_msg = f"Auto-commit retry failed for {deal['title']} with quantity {min_qty}. Response: {retry_text[:200]}\nStack trace:\n{traceback.format_exc()}"
-                                                        DiscordNotifier().send_error_notification(error_msg)
-                                                        self.logger.warning(f"Auto-commit retry failed for {deal['title']} with quantity {min_qty}. Response: {retry_text[:200]}")
-                                                        return False
-                                                else:
-                                                    error_msg = f"Auto-commit retry failed with status {commit_response2.status_code} for {deal['title']}\nStack trace:\n{traceback.format_exc()}"
-                                                    DiscordNotifier().send_error_notification(error_msg)
-                                                    self.logger.warning(f"Auto-commit retry failed with status {commit_response2.status_code} for {deal['title']}")
-                                                    return False
-                                            else:
-                                                error_msg = f"Auto-commit failed for {deal['title']}: Could not determine minimum quantity from response: {response_text[:200]}\nStack trace:\n{traceback.format_exc()}"
-                                                DiscordNotifier().send_error_notification(error_msg)
-                                                self.logger.warning(f"Auto-commit failed for {deal['title']}: Could not determine minimum quantity from response: {response_text[:200]}")
-                                                return False
-                                        else:
-                                            # No "Must buy" error, commit was successful
-                                            success_msg = f"Auto-commit succeeded for {deal['title']} with quantity {AUTO_COMMIT_QUANTITY}"
-                                            DiscordNotifier().send_warning_notification(success_msg)
-                                            self.logger.info(success_msg)
-                                            return True
-                                    else:
-                                        error_msg = f"Commit failed with status {commit_response.status_code} for {deal['title']}\nStack trace:\n{traceback.format_exc()}"
-                                        DiscordNotifier().send_error_notification(error_msg)
-                                        self.logger.warning(f"Commit failed with status {commit_response.status_code} for {deal['title']}")
-                                        return False
                                         
-                                except Exception as json_error:
-                                    self.logger.warning(f"JSON commit failed, trying form data: {json_error}")
-                                    
-                                    # Fallback to form data approach
-                                    form_data = {
-                                        '_token': csrf_token,
-                                        f'commitments.{deal_id}.amount': AUTO_COMMIT_QUANTITY
-                                    }
-                                    
-                                    commit_response = self.session.post(
-                                        update_url,
-                                        data=form_data,
-                                        headers={'X-Requested-With': 'XMLHttpRequest'}
-                                    )
-                                    
-                                    if commit_response.status_code == 200:
-                                        response_text = commit_response.text.lower()
-                                        if "must buy" in response_text and "or more" in response_text:
-                                            # Handle minimum quantity retry for form data
-                                            patterns = [
-                                                r'must buy (\d+) or more',
-                                                r'minimum (\d+)',
-                                                r'at least (\d+)',
-                                                r'buy (\d+) or more'
-                                            ]
+                                        min_qty = None
+                                        for pattern in patterns:
+                                            match = re.search(pattern, response_text)
+                                            if match:
+                                                min_qty = int(match.group(1))
+                                                break
+                                        
+                                        if min_qty and min_qty > AUTO_COMMIT_QUANTITY:
+                                            error_msg = f"Auto-commit failed for {deal['title']}: Must buy at least {min_qty}. Retrying with {min_qty}.\nStack trace:\n{traceback.format_exc()}"
+                                            DiscordNotifier().send_error_notification(error_msg)
+                                            self.logger.warning(f"Auto-commit failed for {deal['title']}: Must buy at least {min_qty}. Retrying with {min_qty}.")
                                             
-                                            min_qty = None
-                                            for pattern in patterns:
-                                                match = re.search(pattern, response_text)
-                                                if match:
-                                                    min_qty = int(match.group(1))
-                                                    break
+                                            # Retry with the correct minimum quantity
+                                            json_data['serverMemo']['data']['commitments'][deal_id]['amount'] = min_qty
                                             
-                                            if min_qty and min_qty > AUTO_COMMIT_QUANTITY:
-                                                error_msg = f"Auto-commit failed for {deal['title']}: Must buy at least {min_qty}. Retrying with {min_qty}.\nStack trace:\n{traceback.format_exc()}"
-                                                DiscordNotifier().send_error_notification(error_msg)
-                                                self.logger.warning(f"Auto-commit failed for {deal['title']}: Must buy at least {min_qty}. Retrying with {min_qty}.")
-                                                
-                                                form_data[f'commitments.{deal_id}.amount'] = min_qty
-                                                
-                                                commit_response2 = self.session.post(
-                                                    update_url,
-                                                    data=form_data,
-                                                    headers={'X-Requested-With': 'XMLHttpRequest'}
-                                                )
-                                                
-                                                if commit_response2.status_code == 200:
-                                                    retry_text = commit_response2.text.lower()
-                                                    if "must buy" not in retry_text and "error" not in retry_text:
-                                                        success_msg = f"Auto-commit succeeded for {deal['title']} with quantity {min_qty}"
-                                                        DiscordNotifier().send_warning_notification(success_msg)
-                                                        self.logger.info(success_msg)
-                                                        return True
-                                                    else:
-                                                        error_msg = f"Auto-commit retry failed for {deal['title']} with quantity {min_qty}. Response: {retry_text[:200]}\nStack trace:\n{traceback.format_exc()}"
-                                                        DiscordNotifier().send_error_notification(error_msg)
-                                                        self.logger.warning(f"Auto-commit retry failed for {deal['title']} with quantity {min_qty}. Response: {retry_text[:200]}")
-                                                        return False
+                                            commit_response2 = self.session.post(
+                                                update_url,
+                                                json=json_data,
+                                                headers=headers
+                                            )
+                                            
+                                            if commit_response2.status_code == 200:
+                                                retry_text = commit_response2.text.lower()
+                                                if "must buy" not in retry_text and "error" not in retry_text:
+                                                    success_msg = f"Auto-commit succeeded for {deal['title']} with quantity {min_qty}"
+                                                    DiscordNotifier().send_warning_notification(success_msg)
+                                                    self.logger.info(success_msg)
+                                                    return True
                                                 else:
-                                                    error_msg = f"Auto-commit retry failed with status {commit_response2.status_code} for {deal['title']}\nStack trace:\n{traceback.format_exc()}"
+                                                    error_msg = f"Auto-commit retry failed for {deal['title']} with quantity {min_qty}. Response: {retry_text[:200]}\nStack trace:\n{traceback.format_exc()}"
                                                     DiscordNotifier().send_error_notification(error_msg)
-                                                    self.logger.warning(f"Auto-commit retry failed with status {commit_response2.status_code} for {deal['title']}")
+                                                    self.logger.warning(f"Auto-commit retry failed for {deal['title']} with quantity {min_qty}. Response: {retry_text[:200]}")
                                                     return False
                                             else:
-                                                error_msg = f"Auto-commit failed for {deal['title']}: Could not determine minimum quantity from response: {response_text[:200]}\nStack trace:\n{traceback.format_exc()}"
+                                                error_msg = f"Auto-commit retry failed with status {commit_response2.status_code} for {deal['title']}\nStack trace:\n{traceback.format_exc()}"
                                                 DiscordNotifier().send_error_notification(error_msg)
-                                                self.logger.warning(f"Auto-commit failed for {deal['title']}: Could not determine minimum quantity from response: {response_text[:200]}")
+                                                self.logger.warning(f"Auto-commit retry failed with status {commit_response2.status_code} for {deal['title']}")
                                                 return False
                                         else:
-                                            # No "Must buy" error, commit was successful
-                                            success_msg = f"Auto-commit succeeded for {deal['title']} with quantity {AUTO_COMMIT_QUANTITY}"
-                                            DiscordNotifier().send_warning_notification(success_msg)
-                                            self.logger.info(success_msg)
-                                            return True
+                                            error_msg = f"Auto-commit failed for {deal['title']}: Could not determine minimum quantity from response: {response_text[:200]}\nStack trace:\n{traceback.format_exc()}"
+                                            DiscordNotifier().send_error_notification(error_msg)
+                                            self.logger.warning(f"Auto-commit failed for {deal['title']}: Could not determine minimum quantity from response: {response_text[:200]}")
+                                            return False
                                     else:
-                                        error_msg = f"Form commit failed with status {commit_response.status_code} for {deal['title']}\nStack trace:\n{traceback.format_exc()}"
-                                        DiscordNotifier().send_error_notification(error_msg)
-                                        self.logger.warning(f"Form commit failed with status {commit_response.status_code} for {deal['title']}")
-                                        return False
+                                        # No "Must buy" error, commit was successful
+                                        success_msg = f"Auto-commit succeeded for {deal['title']} with quantity {AUTO_COMMIT_QUANTITY}"
+                                        DiscordNotifier().send_warning_notification(success_msg)
+                                        self.logger.info(success_msg)
+                                        return True
+                                else:
+                                    error_msg = f"Commit failed with status {commit_response.status_code} for {deal['title']}\nStack trace:\n{traceback.format_exc()}"
+                                    DiscordNotifier().send_error_notification(error_msg)
+                                    self.logger.warning(f"Commit failed with status {commit_response.status_code} for {deal['title']}")
+                                    return False
                             else:
                                 error_msg = f"Could not find CSRF token for commit for {deal['title']}\nStack trace:\n{traceback.format_exc()}"
                                 DiscordNotifier().send_error_notification(error_msg)
                                 self.logger.warning(f"Could not find CSRF token for commit for {deal['title']}")
                                 return False
                         else:
-                            error_msg = f"Could not extract deal ID from wire:model.lazy for {deal['title']}\nStack trace:\n{traceback.format_exc()}"
+                            error_msg = f"Could not extract deal ID from wire:click for {deal['title']}\nStack trace:\n{traceback.format_exc()}"
                             DiscordNotifier().send_error_notification(error_msg)
-                            self.logger.warning(f"Could not extract deal ID from wire:model.lazy for {deal['title']}")
+                            self.logger.warning(f"Could not extract deal ID from wire:click for {deal['title']}")
                             return False
                     else:
-                        error_msg = f"Could not find amount input with wire:model.lazy for deal {deal['title']}\nStack trace:\n{traceback.format_exc()}"
+                        error_msg = f"Could not find commit button with wire:click for deal {deal['title']}\nStack trace:\n{traceback.format_exc()}"
                         DiscordNotifier().send_error_notification(error_msg)
-                        self.logger.warning(f"Could not find amount input with wire:model.lazy for deal {deal['title']}")
+                        self.logger.warning(f"Could not find commit button with wire:click for deal {deal['title']}")
                         return False
             
             error_msg = f"Could not find deal card for: {deal['title']}\nStack trace:\n{traceback.format_exc()}"
