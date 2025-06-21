@@ -353,15 +353,19 @@ class BuyingGroupScraper:
                                     csrf_token = csrf_input.get('value')
                             
                             if csrf_token:
-                                # Use form-based submission instead of Livewire API
-                                self.logger.info(f"Attempting form-based commit for deal {deal_id} with quantity {AUTO_COMMIT_QUANTITY}")
+                                # Use the correct Livewire API based on actual browser requests
+                                self.logger.info(f"Attempting Livewire API commit for deal {deal_id} with quantity {AUTO_COMMIT_QUANTITY}")
                                 
                                 if isinstance(csrf_token, str):
-                                    if self._try_form_submission(deal, deal_id, csrf_token):
+                                    if self._try_livewire_api(deal, deal_id, csrf_token):
                                         return True
                                     else:
-                                        self.logger.warning(f"Form submission failed for {deal['title']}")
-                                        return False
+                                        self.logger.warning(f"Livewire API failed for {deal['title']}, trying form submission...")
+                                        if self._try_form_submission(deal, deal_id, csrf_token):
+                                            return True
+                                        else:
+                                            self.logger.warning(f"All commit methods failed for {deal['title']}")
+                                            return False
                                 else:
                                     self.logger.warning(f"Invalid CSRF token type: {type(csrf_token)}")
                                     return False
@@ -512,4 +516,199 @@ class BuyingGroupScraper:
             
         except Exception as e:
             self.logger.error(f"Error during form submission: {e}")
+            return False
+    
+    def _try_livewire_api(self, deal: Dict, deal_id: str, csrf_token: str) -> bool:
+        """Try Livewire API submission based on actual browser requests."""
+        try:
+            self.logger.info(f"Attempting Livewire API submission for deal {deal_id}")
+            
+            # Get the dashboard page to extract Livewire component ID
+            response = self.session.get(BUYING_GROUP_DASHBOARD_URL)
+            response.raise_for_status()
+            soup = BeautifulSoup(response.text, 'html.parser')
+            
+            # Find the Livewire component ID
+            livewire_component = soup.find('div', attrs={'wire:id': True})
+            livewire_id = None
+            if livewire_component and hasattr(livewire_component, 'get') and not isinstance(livewire_component, str):
+                livewire_id = livewire_component.get('wire:id')
+            
+            if not livewire_id:
+                self.logger.warning("Could not find Livewire component ID")
+                return False
+            
+            self.logger.info(f"Found Livewire component ID: {livewire_id}")
+            
+            # Use the correct Livewire endpoint
+            livewire_url = f"https://app.buyinggroup.ca/livewire/message/app.dashboard.deals"
+            
+            # Prepare headers based on the actual curl request
+            headers = {
+                'accept': 'text/html, application/xhtml+xml',
+                'accept-language': 'en-CA,en-GB;q=0.9,en-US;q=0.8,en-IN;q=0.7,en;q=0.6',
+                'content-type': 'application/json',
+                'origin': 'https://app.buyinggroup.ca',
+                'referer': 'https://app.buyinggroup.ca/',
+                'x-csrf-token': csrf_token,
+                'x-livewire': 'true'
+            }
+            
+            # First, sync the input (set quantity)
+            sync_payload = {
+                "fingerprint": {
+                    "id": livewire_id,
+                    "name": "app.dashboard.deals",
+                    "locale": "en",
+                    "path": "/",
+                    "method": "GET",
+                    "v": "acj"
+                },
+                "serverMemo": {
+                    "children": [],
+                    "errors": {},
+                    "htmlHash": "",
+                    "data": {
+                        "deals": [],
+                        "commitments": {
+                            deal_id: {
+                                "amount": str(AUTO_COMMIT_QUANTITY),
+                                "editing": True,
+                                "max": 10  # Will be updated by server
+                            }
+                        }
+                    },
+                    "dataMeta": {
+                        "modelCollections": {
+                            "deals": {
+                                "class": "App\\Models\\Deal",
+                                "id": [int(deal_id)],
+                                "relations": ["store", "commitments"],
+                                "connection": "mysql",
+                                "collectionClass": None
+                            }
+                        }
+                    },
+                    "checksum": ""
+                },
+                "updates": [
+                    {
+                        "type": "syncInput",
+                        "payload": {
+                            "id": f"commit-{deal_id}",
+                            "name": f"commitments.{deal_id}.amount",
+                            "value": str(AUTO_COMMIT_QUANTITY)
+                        }
+                    }
+                ]
+            }
+            
+            self.logger.info(f"Syncing input for deal {deal_id} with quantity {AUTO_COMMIT_QUANTITY}")
+            sync_response = self.session.post(livewire_url, json=sync_payload, headers=headers)
+            
+            self.logger.info(f"Sync response status: {sync_response.status_code}")
+            self.logger.debug(f"Sync response: {sync_response.text[:500]}")
+            
+            if sync_response.status_code != 200:
+                self.logger.warning(f"Sync input failed with status {sync_response.status_code}")
+                return False
+            
+            # Parse the response to get updated serverMemo
+            try:
+                sync_data = sync_response.json()
+                if 'serverMemo' in sync_data:
+                    server_memo = sync_data['serverMemo']
+                    # Update our payload with the server's response
+                    if 'data' in server_memo and 'commitments' in server_memo['data']:
+                        commitments = server_memo['data']['commitments']
+                        if deal_id in commitments:
+                            max_qty = commitments[deal_id].get('max', 10)
+                            self.logger.info(f"Server returned max quantity: {max_qty}")
+                            
+                            # Check if we need to adjust quantity
+                            if max_qty > 0 and AUTO_COMMIT_QUANTITY > max_qty:
+                                self.logger.warning(f"Requested quantity {AUTO_COMMIT_QUANTITY} exceeds max {max_qty}, adjusting")
+                                actual_quantity = max_qty
+                            else:
+                                actual_quantity = AUTO_COMMIT_QUANTITY
+                        else:
+                            actual_quantity = AUTO_COMMIT_QUANTITY
+                    else:
+                        actual_quantity = AUTO_COMMIT_QUANTITY
+                else:
+                    actual_quantity = AUTO_COMMIT_QUANTITY
+            except Exception as e:
+                self.logger.warning(f"Could not parse sync response: {e}")
+                actual_quantity = AUTO_COMMIT_QUANTITY
+            
+            # Now commit the deal
+            commit_payload = {
+                "fingerprint": {
+                    "id": livewire_id,
+                    "name": "app.dashboard.deals",
+                    "locale": "en",
+                    "path": "/",
+                    "method": "GET",
+                    "v": "acj"
+                },
+                "serverMemo": {
+                    "children": [],
+                    "errors": {},
+                    "htmlHash": "",
+                    "data": {
+                        "deals": [],
+                        "commitments": {
+                            deal_id: {
+                                "amount": str(actual_quantity),
+                                "editing": True,
+                                "max": 10
+                            }
+                        }
+                    },
+                    "dataMeta": {
+                        "modelCollections": {
+                            "deals": {
+                                "class": "App\\Models\\Deal",
+                                "id": [int(deal_id)],
+                                "relations": ["store", "commitments"],
+                                "connection": "mysql",
+                                "collectionClass": None
+                            }
+                        }
+                    },
+                    "checksum": ""
+                },
+                "updates": [
+                    {
+                        "type": "callMethod",
+                        "payload": {
+                            "id": f"commit-{deal_id}",
+                            "method": "commit",
+                            "params": [int(deal_id)]
+                        }
+                    }
+                ]
+            }
+            
+            self.logger.info(f"Committing deal {deal_id} with quantity {actual_quantity}")
+            commit_response = self.session.post(livewire_url, json=commit_payload, headers=headers)
+            
+            self.logger.info(f"Commit response status: {commit_response.status_code}")
+            self.logger.debug(f"Commit response: {commit_response.text[:500]}")
+            
+            if commit_response.status_code == 200:
+                # Check if commit was successful
+                response_text = commit_response.text.lower()
+                if "error" not in response_text and "failed" not in response_text:
+                    self.logger.info(f"Livewire API commit succeeded for {deal['title']}")
+                    return True
+                else:
+                    self.logger.warning(f"Livewire API commit returned error for {deal['title']}")
+                    return False
+            else:
+                self.logger.warning(f"Livewire API commit failed with status {commit_response.status_code}")
+                return False
+            
+        except Exception as e:
+            self.logger.error(f"Error during Livewire API submission: {e}")
             return False 
