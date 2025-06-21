@@ -12,6 +12,12 @@ A Python-based monitoring system for the [Canada Buying Group](https://buyinggro
 - 🔐 **Secure Authentication**: Handles login sessions automatically
 - ☁️ **Cloud Deployment**: Run 24/7 on Railway or Render
 
+## New Features (2024-06)
+
+- **Auto-Commit**: Automatically reserves a specified quantity for new deals (see `AUTO_COMMIT_NEW_DEALS` and `AUTO_COMMIT_QUANTITY` in `.env`)
+- **Comprehensive Logging**: All activity is logged to a file (see `LOG_FILE` in `.env`). For Render, use `/tmp/buying_group_monitor.log`.
+- **Test Coverage**: Run `python main.py test` to verify all core features (scraper, database, notifier, monitor) work as expected.
+
 ## Prerequisites
 
 - Python 3.7 or higher
@@ -207,4 +213,24 @@ If you encounter issues:
 1. Check the troubleshooting section above
 2. Verify your configuration is correct
 3. Test your login credentials
-4. Check if the website structure has changed 
+4. Check if the website structure has changed
+
+## Running Tests
+
+To run all test cases and verify your setup:
+
+```bash
+python main.py test
+```
+
+All tests should pass. If any fail, check your environment variables and database schema.
+
+## Recommended LOG_FILE for Cloud
+
+For Render or Railway, set:
+
+```
+LOG_FILE=/tmp/buying_group_monitor.log
+```
+
+in your environment variables dashboard. 

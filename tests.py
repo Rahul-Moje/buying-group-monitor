@@ -58,9 +58,11 @@ class TestBuyingGroupScraper(unittest.TestCase):
         mock_session_instance.post.return_value = mock_response
         mock_session.return_value = mock_session_instance
         
-        # Test login
+        # Test login with mocked credentials and URL
         with patch('scraper.USERNAME', 'test@example.com'), \
-             patch('scraper.PASSWORD', 'testpass'):
+             patch('scraper.PASSWORD', 'testpass'), \
+             patch('scraper.BUYING_GROUP_LOGIN_URL', 'https://buyinggroup.ca/login'), \
+             patch('scraper.BUYING_GROUP_DASHBOARD_URL', 'https://buyinggroup.ca/dashboard'):
             result = self.scraper.login()
             self.assertTrue(result)
     
@@ -78,9 +80,10 @@ class TestBuyingGroupScraper(unittest.TestCase):
         mock_session_instance.post.return_value = mock_response
         mock_session.return_value = mock_session_instance
         
-        # Test login
+        # Test login with mocked credentials
         with patch('scraper.USERNAME', 'test@example.com'), \
-             patch('scraper.PASSWORD', 'wrongpass'):
+             patch('scraper.PASSWORD', 'wrongpass'), \
+             patch('scraper.BUYING_GROUP_LOGIN_URL', 'https://buyinggroup.ca/login'):
             result = self.scraper.login()
             self.assertFalse(result)
 
@@ -114,10 +117,12 @@ class TestDealDatabase(unittest.TestCase):
         
         # Add deal
         result = self.db.add_deal(deal)
+        print(f"add_deal returned: {result}")
         self.assertTrue(result)
         
         # Retrieve deal
         retrieved_deal = self.db.get_deal_by_id('test123')
+        print(f"retrieved_deal: {retrieved_deal}")
         self.assertIsNotNone(retrieved_deal)
         self.assertEqual(retrieved_deal['title'], 'Test Product')
         self.assertEqual(retrieved_deal['price'], 10.99)
@@ -136,13 +141,17 @@ class TestDealDatabase(unittest.TestCase):
             'link': 'https://example.com',
             'delivery_date': '2024-01-01'
         }
-        self.db.add_deal(deal)
+        add_result = self.db.add_deal(deal)
+        print(f"add_deal returned: {add_result}")
+        self.assertTrue(add_result)
         
         # Update quantity
         self.db.update_deal_quantity('test123', 3)
         
         # Check update
         updated_deal = self.db.get_deal_by_id('test123')
+        print(f"updated_deal: {updated_deal}")
+        self.assertIsNotNone(updated_deal)
         self.assertEqual(updated_deal['current_quantity'], 3)
     
     def test_notification_tracking(self):
@@ -186,6 +195,7 @@ class TestDiscordNotifier(unittest.TestCase):
         mock_response = Mock()
         mock_response.status_code = 404
         mock_post.return_value = mock_response
+        mock_post.side_effect = Exception("Webhook not found")
         
         deals = [{
             'title': 'Test Product',

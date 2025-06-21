@@ -44,55 +44,55 @@ def setup_logger(name: str = 'buying_group_monitor') -> logging.Logger:
 
 def log_monitoring_start(logger: logging.Logger):
     """Log monitoring session start."""
-    logger.info("🚀 Buying Group Monitor started")
+    logger.info("Buying Group Monitor started")
     logger.info(f"Check interval: {os.getenv('CHECK_INTERVAL_MINUTES', '5')} minutes")
     logger.info(f"Auto-commit enabled: {os.getenv('AUTO_COMMIT_NEW_DEALS', 'true')}")
     logger.info(f"Auto-commit quantity: {os.getenv('AUTO_COMMIT_QUANTITY', '1')}")
 
 def log_check_start(logger: logging.Logger):
     """Log the start of a monitoring check."""
-    logger.info("🔍 Starting monitoring check...")
+    logger.info("Starting monitoring check...")
 
 def log_check_complete(logger: logging.Logger, new_deals: int, updated_deals: int):
     """Log the completion of a monitoring check."""
     if new_deals > 0 or updated_deals > 0:
-        logger.info(f"✅ Check complete: {new_deals} new deals, {updated_deals} updated deals")
+        logger.info(f"Check complete: {new_deals} new deals, {updated_deals} updated deals")
     else:
-        logger.info("✅ Check complete: No new deals or updates found")
+        logger.info("Check complete: No new deals or updates found")
 
 def log_new_deal(logger: logging.Logger, deal: dict):
     """Log a new deal found."""
-    logger.info(f"🆕 New deal found: {deal['title']} (ID: {deal['deal_id']})")
+    logger.info(f"New deal found: {deal['title']} (ID: {deal['deal_id']})")
     logger.info(f"   Store: {deal['store']}")
     logger.info(f"   Price: ${deal['price']:.2f}")
     logger.info(f"   Max Quantity: {deal['max_quantity']}")
 
 def log_existing_deal(logger: logging.Logger, deal: dict):
     """Log an existing deal found."""
-    logger.debug(f"📋 Existing deal: {deal['title']} (ID: {deal['deal_id']})")
+    logger.debug(f"Existing deal: {deal['title']} (ID: {deal['deal_id']})")
 
 def log_quantity_update(logger: logging.Logger, deal: dict, old_qty: int, new_qty: int):
     """Log a quantity update."""
-    logger.info(f"📊 Quantity updated for {deal['title']}: {old_qty} → {new_qty}")
+    logger.info(f"Quantity updated for {deal['title']}: {old_qty} -> {new_qty}")
 
 def log_commitment_update(logger: logging.Logger, deal: dict, old_commit: int, new_commit: int):
     """Log a commitment update."""
-    logger.info(f"📝 Commitment updated for {deal['title']}: {old_commit} → {new_commit}")
+    logger.info(f"Commitment updated for {deal['title']}: {old_commit} -> {new_commit}")
 
 def log_auto_commit(logger: logging.Logger, deal: dict, quantity: int):
     """Log automatic commitment."""
-    logger.info(f"🤖 Auto-committed {quantity} item(s) for {deal['title']}")
+    logger.info(f"Auto-committed {quantity} item(s) for {deal['title']}")
 
 def log_error(logger: logging.Logger, error: str, context: str = ""):
     """Log an error."""
     if context:
-        logger.error(f"❌ Error in {context}: {error}")
+        logger.error(f"Error in {context}: {error}")
     else:
-        logger.error(f"❌ Error: {error}")
+        logger.error(f"Error: {error}")
 
 def log_discord_notification(logger: logging.Logger, notification_type: str, success: bool):
     """Log Discord notification status."""
     if success:
-        logger.info(f"📨 Discord {notification_type} notification sent successfully")
+        logger.info(f"Discord {notification_type} notification sent successfully")
     else:
-        logger.error(f"📨 Failed to send Discord {notification_type} notification") 
+        logger.error(f"Failed to send Discord {notification_type} notification") 

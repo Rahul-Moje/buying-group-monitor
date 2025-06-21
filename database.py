@@ -43,6 +43,14 @@ class DealDatabase:
                 )
             ''')
             
+            # Check if your_commitment column exists, if not add it
+            cursor.execute("PRAGMA table_info(deals)")
+            columns = [column[1] for column in cursor.fetchall()]
+            
+            if 'your_commitment' not in columns:
+                cursor.execute('ALTER TABLE deals ADD COLUMN your_commitment INTEGER DEFAULT 0')
+                print("Added your_commitment column to existing database")
+            
             conn.commit()
     
     def add_deal(self, deal_data: Dict) -> bool:

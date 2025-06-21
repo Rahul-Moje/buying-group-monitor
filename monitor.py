@@ -49,7 +49,7 @@ class BuyingGroupMonitor:
                     
                     # Auto-commit if enabled
                     if AUTO_COMMIT_NEW_DEALS:
-                        self.logger.info(f"🤖 Attempting auto-commit for new deal: {deal['title']}")
+                        self.logger.info(f"Attempting auto-commit for new deal: {deal['title']}")
                         if self.scraper.auto_commit_deal(deal):
                             log_auto_commit(self.logger, deal, 1)
                             # Update the deal with committed quantity
