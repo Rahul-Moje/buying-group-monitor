@@ -11,12 +11,17 @@ A Python-based monitoring system for the [Canada Buying Group](https://buyinggro
 - 📈 **Statistics**: Track deal history and statistics
 - 🔐 **Secure Authentication**: Handles login sessions automatically
 - ☁️ **Cloud Deployment**: Run 24/7 on Railway or Render
+- 🤖 **Auto-Commit**: Automatically reserves items for new deals
+- 🚨 **Error Handling**: Comprehensive error notifications with stack traces
+- 🔄 **Smart Retry Logic**: Handles minimum quantity requirements automatically
 
 ## New Features (2024-06)
 
-- **Auto-Commit**: Automatically reserves a specified quantity for new deals (see `AUTO_COMMIT_NEW_DEALS` and `AUTO_COMMIT_QUANTITY` in `.env`)
+- **Auto-Commit with Smart Error Handling**: Automatically reserves items and handles "Must buy X or more" errors with retry logic
+- **Discord Error Notifications**: All warnings and errors are sent to Discord with full stack traces for debugging
 - **Comprehensive Logging**: All activity is logged to a file (see `LOG_FILE` in `.env`). For Render, use `/tmp/buying_group_monitor.log`.
-- **Test Coverage**: Run `python main.py test` to verify all core features (scraper, database, notifier, monitor) work as expected.
+- **Network Resilience**: Configurable retry logic with exponential backoff for network requests
+- **Test Coverage**: Run `python main.py test` to verify all core features work as expected.
 
 ## Prerequisites
 
@@ -52,6 +57,8 @@ A Python-based monitoring system for the [Canada Buying Group](https://buyinggro
    BUYING_GROUP_PASSWORD=your_password
    DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/YOUR_WEBHOOK_URL
    CHECK_INTERVAL_MINUTES=5
+   AUTO_COMMIT_NEW_DEALS=true
+   AUTO_COMMIT_QUANTITY=1
    ```
 
 ## Discord Webhook Setup (Optional)
@@ -60,6 +67,23 @@ A Python-based monitoring system for the [Canada Buying Group](https://buyinggro
 2. Go to Server Settings > Integrations > Webhooks
 3. Create a new webhook
 4. Copy the webhook URL and add it to your `.env` file
+
+## Auto-Commit Feature
+
+The monitor can automatically reserve items for new deals:
+
+- **Enabled by default**: Set `AUTO_COMMIT_NEW_DEALS=true`
+- **Configurable quantity**: Set `AUTO_COMMIT_QUANTITY=1` (or higher)
+- **Smart error handling**: Automatically detects "Must buy X or more" errors and retries with the correct quantity
+- **Discord notifications**: You'll get notified of all auto-commit attempts and results
+
+### Auto-Commit Error Handling
+
+When auto-commit encounters a minimum quantity requirement:
+1. **First attempt**: Tries with your configured quantity
+2. **Error detection**: Parses the error message to find minimum requirement
+3. **Retry attempt**: Automatically retries with the correct minimum quantity
+4. **Notification**: Sends Discord notification with the result
 
 ## Cloud Deployment (24/7 Operation)
 
@@ -99,14 +123,38 @@ python deploy_cloud.py
 
 Set these in your cloud platform's dashboard:
 
-| Variable | Description | Required |
-|----------|-------------|----------|
-| `BUYING_GROUP_USERNAME` | Your buying group email | ✅ Yes |
-| `BUYING_GROUP_PASSWORD` | Your buying group password | ✅ Yes |
-| `DISCORD_WEBHOOK_URL` | Discord webhook URL for notifications | ❌ No |
-| `CHECK_INTERVAL_MINUTES` | How often to check for new deals | ❌ No (default: 5) |
+| Variable | Description | Required | Default |
+|----------|-------------|----------|---------|
+| `BUYING_GROUP_USERNAME` | Your buying group email | ✅ Yes | - |
+| `BUYING_GROUP_PASSWORD` | Your buying group password | ✅ Yes | - |
+| `DISCORD_WEBHOOK_URL` | Discord webhook URL for notifications | ❌ No | - |
+| `CHECK_INTERVAL_MINUTES` | How often to check for new deals | ❌ No | 5 |
+| `AUTO_COMMIT_NEW_DEALS` | Enable auto-commit for new deals | ❌ No | true |
+| `AUTO_COMMIT_QUANTITY` | Default quantity for auto-commit | ❌ No | 1 |
+| `LOG_LEVEL` | Logging level (DEBUG, INFO, WARNING, ERROR) | ❌ No | INFO |
+| `LOG_FILE` | Log file path (use `/tmp/` for cloud) | ❌ No | buying_group_monitor.log |
+| `DEBUG` | Enable debug mode (shows credentials) | ❌ No | false |
+| `DATABASE_PATH` | Database file path | ❌ No | buying_group_deals.db |
+| `REQUEST_TIMEOUT` | Network request timeout (seconds) | ❌ No | 30 |
+| `MAX_RETRIES` | Maximum retry attempts | ❌ No | 3 |
+| `RETRY_DELAY` | Delay between retries (seconds) | ❌ No | 5 |
+
+### Render-Specific Settings
+
+For Render deployment, use these values:
+
+```env
+LOG_FILE=/tmp/buying_group_monitor.log
+DATABASE_PATH=/tmp/buying_group_deals.db
+DEBUG=false
+```
 
 ## Local Testing
+
+### Run All Tests
+```bash
+python main.py test
+```
 
 ### Test Login Credentials
 ```bash
@@ -141,14 +189,24 @@ python main.py update-commitment <deal_id> <new_quantity>
 | `BUYING_GROUP_PASSWORD` | Your buying group password | Required |
 | `DISCORD_WEBHOOK_URL` | Discord webhook URL for notifications | Optional |
 | `CHECK_INTERVAL_MINUTES` | How often to check for new deals | 5 |
+| `AUTO_COMMIT_NEW_DEALS` | Enable auto-commit for new deals | true |
+| `AUTO_COMMIT_QUANTITY` | Default quantity for auto-commit | 1 |
+| `LOG_LEVEL` | Logging level | INFO |
+| `LOG_FILE` | Log file path | buying_group_monitor.log |
+| `DEBUG` | Enable debug mode | false |
+| `REQUEST_TIMEOUT` | Network timeout (seconds) | 30 |
+| `MAX_RETRIES` | Retry attempts | 3 |
+| `RETRY_DELAY` | Retry delay (seconds) | 5 |
 
 ## How It Works
 
 1. **Authentication**: The monitor logs into your buying group account
 2. **Scraping**: It scrapes the dashboard page for current deals
 3. **Comparison**: New deals are compared against the local database
-4. **Notifications**: Discord notifications are sent for new deals, quantity changes, and commitment updates
-5. **Storage**: All deal information is stored in SQLite database
+4. **Auto-Commit**: If enabled, automatically reserves items for new deals
+5. **Error Handling**: Detects and handles minimum quantity requirements
+6. **Notifications**: Discord notifications are sent for new deals, errors, and auto-commit results
+7. **Storage**: All deal information is stored in SQLite database
 
 ## File Structure
 
@@ -160,6 +218,8 @@ buying-group-monitor/
 ├── database.py          # Database operations
 ├── notifier.py          # Discord notifications
 ├── config.py            # Configuration management
+├── logger.py            # Logging setup
+├── tests.py             # Test cases
 ├── deploy_cloud.py      # Cloud deployment setup
 ├── requirements.txt     # Python dependencies
 ├── env_example.txt      # Environment variables example
@@ -184,10 +244,16 @@ buying-group-monitor/
 - Check if the webhook is still active in Discord
 - Ensure the webhook has permission to send messages
 
+### Auto-Commit Issues
+- Check Discord for error notifications with stack traces
+- Verify minimum quantity requirements are being handled
+- Check logs for detailed error information
+
 ### Cloud Deployment Issues
 - Check environment variables are set correctly
 - Verify the health check endpoint is working (`/health`)
 - Check cloud platform logs for errors
+- Ensure log file path uses `/tmp/` directory
 
 ### Database Issues
 - The database file is created automatically
@@ -198,7 +264,7 @@ buying-group-monitor/
 - Your credentials are stored securely in cloud environment variables
 - Never commit your `.env` file to version control
 - The database contains deal information but no sensitive data
-- All communication with the buying group website uses HTTPS
+- Debug mode should only be enabled temporarily for troubleshooting
 
 ## Legal Considerations
 

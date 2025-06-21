@@ -18,6 +18,7 @@ from config import (
 )
 import hashlib
 import logging
+import traceback
 
 class BuyingGroupScraper:
     def __init__(self):
@@ -283,13 +284,14 @@ class BuyingGroupScraper:
             return False
     
     def auto_commit_deal(self, deal: Dict) -> bool:
-        """Automatically commit to a deal by submitting the form. Sends Discord warning on failure or special cases."""
+        """Automatically commit to a deal by submitting the form. Sends Discord error notifications on failure or special cases."""
         try:
             # Find the commit form for this deal
             response = self.session.get(BUYING_GROUP_DASHBOARD_URL)
             response.raise_for_status()
             soup = BeautifulSoup(response.text, 'html.parser')
             deal_cards = soup.find_all('div', class_='group relative flex flex-col overflow-hidden rounded-lg border border-gray-200 bg-white')
+            
             for card in deal_cards:
                 title_elem = card.find('h3', class_='text-sm font-medium text-gray-900')
                 title = title_elem.get_text(strip=True) if title_elem else ""
@@ -299,6 +301,7 @@ class BuyingGroupScraper:
                     store_text = store_elem.get_text(strip=True)
                     if "From:" in store_text:
                         store = store_text.split("From:")[1].strip()
+                
                 if title == deal['title'] and store == deal['store']:
                     form = card.find('form')
                     if form:
@@ -306,83 +309,129 @@ class BuyingGroupScraper:
                         method = form.get('method', 'post').lower()
                         csrf_input = form.find('input', {'name': '_token'})
                         csrf_token = csrf_input.get('value') if csrf_input else None
+                        
                         if not csrf_token:
                             page_csrf = soup.find('meta', {'name': 'csrf-token'})
                             if page_csrf:
                                 csrf_token = page_csrf.get('content')
+                        
                         if csrf_token:
+                            # Try with initial quantity first
                             commit_data = {
                                 '_token': csrf_token,
                                 'quantity': AUTO_COMMIT_QUANTITY
                             }
+                            
                             for input_field in form.find_all('input'):
                                 name = input_field.get('name')
                                 value = input_field.get('value')
                                 if name and name not in commit_data:
                                     commit_data[name] = value
+                            
                             commit_url = action if action.startswith('http') else f"https://buyinggroup.ca{action}"
+                            
+                            # First attempt with default quantity
                             if method == 'post':
                                 commit_response = self.session.post(commit_url, data=commit_data)
                             else:
                                 commit_response = self.session.get(commit_url, params=commit_data)
+                            
                             if commit_response.status_code == 200:
-                                # Check for special error in response text
-                                if "Must buy" in commit_response.text and "or more" in commit_response.text:
+                                # Check for "Must buy X or more" error in response
+                                response_text = commit_response.text.lower()
+                                if "must buy" in response_text and "or more" in response_text:
                                     import re
-                                    match = re.search(r'Must buy (\d+) or more', commit_response.text)
-                                    if match:
-                                        min_qty = int(match.group(1))
-                                        warning_msg = f"Auto-commit failed for {deal['title']}: Must buy at least {min_qty}. Retrying with {min_qty}."
+                                    # Try different patterns to extract the minimum quantity
+                                    patterns = [
+                                        r'must buy (\d+) or more',
+                                        r'minimum (\d+)',
+                                        r'at least (\d+)',
+                                        r'buy (\d+) or more'
+                                    ]
+                                    
+                                    min_qty = None
+                                    for pattern in patterns:
+                                        match = re.search(pattern, response_text)
+                                        if match:
+                                            min_qty = int(match.group(1))
+                                            break
+                                    
+                                    if min_qty and min_qty > AUTO_COMMIT_QUANTITY:
+                                        error_msg = f"Auto-commit failed for {deal['title']}: Must buy at least {min_qty}. Retrying with {min_qty}.\nStack trace:\n{traceback.format_exc()}"
                                         from notifier import DiscordNotifier
-                                        DiscordNotifier().send_warning_notification(warning_msg)
-                                        self.logger.warning(warning_msg)
-                                        if min_qty > AUTO_COMMIT_QUANTITY:
-                                            commit_data['quantity'] = min_qty
-                                            if method == 'post':
-                                                commit_response2 = self.session.post(commit_url, data=commit_data)
-                                            else:
-                                                commit_response2 = self.session.get(commit_url, params=commit_data)
-                                            if commit_response2.status_code == 200 and "Must buy" not in commit_response2.text:
-                                                self.logger.info(f"Auto-commit succeeded for {deal['title']} with quantity {min_qty}")
+                                        DiscordNotifier().send_error_notification(error_msg)
+                                        self.logger.warning(f"Auto-commit failed for {deal['title']}: Must buy at least {min_qty}. Retrying with {min_qty}.")
+                                        
+                                        # Retry with the correct minimum quantity
+                                        commit_data['quantity'] = min_qty
+                                        
+                                        # Get fresh CSRF token for retry
+                                        retry_response = self.session.get(BUYING_GROUP_DASHBOARD_URL)
+                                        retry_soup = BeautifulSoup(retry_response.text, 'html.parser')
+                                        retry_csrf = retry_soup.find('meta', {'name': 'csrf-token'})
+                                        if retry_csrf:
+                                            commit_data['_token'] = retry_csrf.get('content')
+                                        
+                                        if method == 'post':
+                                            commit_response2 = self.session.post(commit_url, data=commit_data)
+                                        else:
+                                            commit_response2 = self.session.get(commit_url, params=commit_data)
+                                        
+                                        if commit_response2.status_code == 200:
+                                            # Check if retry was successful (no error messages)
+                                            retry_text = commit_response2.text.lower()
+                                            if "must buy" not in retry_text and "error" not in retry_text:
+                                                success_msg = f"Auto-commit succeeded for {deal['title']} with quantity {min_qty}"
+                                                DiscordNotifier().send_warning_notification(success_msg)
+                                                self.logger.info(success_msg)
                                                 return True
                                             else:
-                                                error_msg = f"Auto-commit retry failed for {deal['title']} with quantity {min_qty}."
-                                                DiscordNotifier().send_warning_notification(error_msg)
-                                                self.logger.warning(error_msg)
+                                                error_msg = f"Auto-commit retry failed for {deal['title']} with quantity {min_qty}. Response: {retry_text[:200]}\nStack trace:\n{traceback.format_exc()}"
+                                                DiscordNotifier().send_error_notification(error_msg)
+                                                self.logger.warning(f"Auto-commit retry failed for {deal['title']} with quantity {min_qty}. Response: {retry_text[:200]}")
                                                 return False
+                                        else:
+                                            error_msg = f"Auto-commit retry failed with status {commit_response2.status_code} for {deal['title']}\nStack trace:\n{traceback.format_exc()}"
+                                            DiscordNotifier().send_error_notification(error_msg)
+                                            self.logger.warning(f"Auto-commit retry failed with status {commit_response2.status_code} for {deal['title']}")
+                                            return False
                                     else:
-                                        error_msg = f"Auto-commit failed for {deal['title']}: Unknown minimum quantity required."
+                                        error_msg = f"Auto-commit failed for {deal['title']}: Could not determine minimum quantity from response: {response_text[:200]}\nStack trace:\n{traceback.format_exc()}"
                                         from notifier import DiscordNotifier
-                                        DiscordNotifier().send_warning_notification(error_msg)
-                                        self.logger.warning(error_msg)
+                                        DiscordNotifier().send_error_notification(error_msg)
+                                        self.logger.warning(f"Auto-commit failed for {deal['title']}: Could not determine minimum quantity from response: {response_text[:200]}")
                                         return False
-                                return True
+                                else:
+                                    # No "Must buy" error, commit was successful
+                                    return True
                             else:
-                                error_msg = f"Commit failed with status {commit_response.status_code} for {deal['title']}"
+                                error_msg = f"Commit failed with status {commit_response.status_code} for {deal['title']}\nStack trace:\n{traceback.format_exc()}"
                                 from notifier import DiscordNotifier
-                                DiscordNotifier().send_warning_notification(error_msg)
-                                self.logger.warning(error_msg)
+                                DiscordNotifier().send_error_notification(error_msg)
+                                self.logger.warning(f"Commit failed with status {commit_response.status_code} for {deal['title']}")
                                 return False
                         else:
-                            error_msg = f"Could not find CSRF token for commit for {deal['title']}"
+                            error_msg = f"Could not find CSRF token for commit for {deal['title']}\nStack trace:\n{traceback.format_exc()}"
                             from notifier import DiscordNotifier
-                            DiscordNotifier().send_warning_notification(error_msg)
-                            self.logger.warning(error_msg)
+                            DiscordNotifier().send_error_notification(error_msg)
+                            self.logger.warning(f"Could not find CSRF token for commit for {deal['title']}")
                             return False
                     else:
-                        error_msg = f"Could not find commit form for deal {deal['title']}"
+                        error_msg = f"Could not find commit form for deal {deal['title']}\nStack trace:\n{traceback.format_exc()}"
                         from notifier import DiscordNotifier
-                        DiscordNotifier().send_warning_notification(error_msg)
-                        self.logger.warning(error_msg)
+                        DiscordNotifier().send_error_notification(error_msg)
+                        self.logger.warning(f"Could not find commit form for deal {deal['title']}")
                         return False
-            error_msg = f"Could not find deal card for: {deal['title']}"
+            
+            error_msg = f"Could not find deal card for: {deal['title']}\nStack trace:\n{traceback.format_exc()}"
             from notifier import DiscordNotifier
-            DiscordNotifier().send_warning_notification(error_msg)
-            self.logger.warning(error_msg)
+            DiscordNotifier().send_error_notification(error_msg)
+            self.logger.warning(f"Could not find deal card for: {deal['title']}")
             return False
+            
         except Exception as e:
-            error_msg = f"Error during auto-commit for {deal.get('title', 'Unknown')}: {e}"
+            error_msg = f"Error during auto-commit for {deal.get('title', 'Unknown')}: {e}\nStack trace:\n{traceback.format_exc()}"
             from notifier import DiscordNotifier
-            DiscordNotifier().send_warning_notification(error_msg)
-            self.logger.error(error_msg)
+            DiscordNotifier().send_error_notification(error_msg)
+            self.logger.error(f"Error during auto-commit for {deal.get('title', 'Unknown')}: {e}")
             return False 
