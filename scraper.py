@@ -7,7 +7,9 @@ from config import (
     BUYING_GROUP_DASHBOARD_URL, 
     USERNAME, 
     PASSWORD, 
-    DEFAULT_HEADERS
+    DEFAULT_HEADERS,
+    AUTO_COMMIT_NEW_DEALS,
+    AUTO_COMMIT_QUANTITY
 )
 import hashlib
 
@@ -217,4 +219,88 @@ class BuyingGroupScraper:
             response = self.session.get(BUYING_GROUP_DASHBOARD_URL)
             return response.status_code == 200 and 'login' not in response.url.lower()
         except:
+            return False
+    
+    def auto_commit_deal(self, deal: Dict) -> bool:
+        """Automatically commit to a deal by submitting the form."""
+        try:
+            # Find the commit form for this deal
+            response = self.session.get(BUYING_GROUP_DASHBOARD_URL)
+            response.raise_for_status()
+            
+            soup = BeautifulSoup(response.text, 'html.parser')
+            
+            # Find the deal card that matches our deal
+            deal_cards = soup.find_all('div', class_='group relative flex flex-col overflow-hidden rounded-lg border border-gray-200 bg-white')
+            
+            for card in deal_cards:
+                # Extract deal info from card to match
+                title_elem = card.find('h3', class_='text-sm font-medium text-gray-900')
+                title = title_elem.get_text(strip=True) if title_elem else ""
+                
+                store_elem = card.find('p', class_='text-sm italic')
+                store = ""
+                if store_elem:
+                    store_text = store_elem.get_text(strip=True)
+                    if "From:" in store_text:
+                        store = store_text.split("From:")[1].strip()
+                
+                # Check if this is the deal we want to commit to
+                if title == deal['title'] and store == deal['store']:
+                    # Find the form in this card
+                    form = card.find('form')
+                    if form:
+                        # Extract form action and method
+                        action = form.get('action', '')
+                        method = form.get('method', 'post').lower()
+                        
+                        # Find CSRF token
+                        csrf_input = form.find('input', {'name': '_token'})
+                        csrf_token = csrf_input.get('value') if csrf_input else None
+                        
+                        if not csrf_token:
+                            # Try to get CSRF token from the page
+                            page_csrf = soup.find('meta', {'name': 'csrf-token'})
+                            if page_csrf:
+                                csrf_token = page_csrf.get('content')
+                        
+                        if csrf_token:
+                            # Prepare commit data
+                            commit_data = {
+                                '_token': csrf_token,
+                                'quantity': AUTO_COMMIT_QUANTITY
+                            }
+                            
+                            # Find additional form fields
+                            for input_field in form.find_all('input'):
+                                name = input_field.get('name')
+                                value = input_field.get('value')
+                                if name and name not in commit_data:
+                                    commit_data[name] = value
+                            
+                            # Submit the commit
+                            if method == 'post':
+                                commit_url = action if action.startswith('http') else f"https://buyinggroup.ca{action}"
+                                commit_response = self.session.post(commit_url, data=commit_data)
+                            else:
+                                commit_url = action if action.startswith('http') else f"https://buyinggroup.ca{action}"
+                                commit_response = self.session.get(commit_url, params=commit_data)
+                            
+                            if commit_response.status_code == 200:
+                                return True
+                            else:
+                                print(f"Commit failed with status {commit_response.status_code}")
+                                return False
+                        else:
+                            print("Could not find CSRF token for commit")
+                            return False
+                    else:
+                        print("Could not find commit form for deal")
+                        return False
+            
+            print(f"Could not find deal card for: {deal['title']}")
+            return False
+            
+        except Exception as e:
+            print(f"Error during auto-commit: {e}")
             return False 

@@ -23,7 +23,15 @@ DISCORD_WEBHOOK_URL = os.getenv('DISCORD_WEBHOOK_URL')
 
 # Monitoring Configuration
 CHECK_INTERVAL_MINUTES = int(os.getenv('CHECK_INTERVAL_MINUTES', '5'))  # Check every 5 minutes by default
-DATABASE_PATH = "buying_group_deals.db"
+DATABASE_PATH = os.getenv('DATABASE_PATH', 'buying_group_deals.db')
+
+# Auto-commit Configuration
+AUTO_COMMIT_NEW_DEALS = os.getenv('AUTO_COMMIT_NEW_DEALS', 'true').lower() == 'true'
+AUTO_COMMIT_QUANTITY = int(os.getenv('AUTO_COMMIT_QUANTITY', '1'))
+
+# Logging Configuration
+LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
+LOG_FILE = os.getenv('LOG_FILE', 'buying_group_monitor.log')
 
 # User Agent to mimic browser
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36"

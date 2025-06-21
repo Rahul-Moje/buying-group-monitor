@@ -48,7 +48,7 @@ Examples:
     
     parser.add_argument(
         'command',
-        choices=['start', 'check', 'stats', 'test-login', 'send-summary', 'update-commitment', 'summary', 'list-commitments'],
+        choices=['start', 'check', 'stats', 'test-login', 'send-summary', 'update-commitment', 'summary', 'list-commitments', 'test'],
         help='Command to execute'
     )
     
@@ -148,7 +148,19 @@ Examples:
                     print(f"• {deal['title']} ({deal['store']}) - ${deal['price']:.2f} - Qty: {commitment}")
                 else:
                     print(f"• {deal['title']} ({deal['store']}) - ${deal['price']:.2f} - No commitment")
-                
+        elif args.command == 'test':
+            print("🧪 Running test cases...")
+            try:
+                from tests import run_tests
+                success = run_tests()
+                if success:
+                    print("✅ All tests passed!")
+                else:
+                    print("❌ Some tests failed!")
+                    sys.exit(1)
+            except ImportError as e:
+                print(f"❌ Error importing tests: {e}")
+                sys.exit(1)
     except KeyboardInterrupt:
         print("\n🛑 Operation cancelled by user")
         sys.exit(0)
