@@ -549,6 +549,47 @@ class BuyingGroupScraper:
             
             self.logger.info(f"Found {len(all_deal_ids)} deal IDs on page: {all_deal_ids}")
             
+            # Try to extract initial serverMemo from page JavaScript
+            initial_server_memo = None
+            script_tags = soup.find_all('script')
+            for script in script_tags:
+                if script.string and 'serverMemo' in script.string:
+                    # Look for serverMemo in script content
+                    memo_match = re.search(r'window\.livewire\.serverMemo\s*=\s*({.*?});', script.string, re.DOTALL)
+                    if memo_match:
+                        try:
+                            import json
+                            initial_server_memo = json.loads(memo_match.group(1))
+                            self.logger.info("Found initial serverMemo from page JavaScript")
+                            break
+                        except json.JSONDecodeError:
+                            continue
+            
+            if not initial_server_memo:
+                self.logger.warning("Could not extract initial serverMemo from page, using fallback")
+                # Use fallback approach
+                initial_server_memo = {
+                    "children": [],
+                    "errors": {},
+                    "htmlHash": "",
+                    "data": {
+                        "deals": [],
+                        "commitments": {}
+                    },
+                    "dataMeta": {
+                        "modelCollections": {
+                            "deals": {
+                                "class": "App\\Models\\Deal",
+                                "id": all_deal_ids,
+                                "relations": ["store", "commitments"],
+                                "connection": "mysql",
+                                "collectionClass": None
+                            }
+                        }
+                    },
+                    "checksum": ""
+                }
+            
             # Use the correct Livewire endpoint
             livewire_url = f"https://app.buyinggroup.ca/livewire/message/app.dashboard.deals"
             
@@ -589,27 +630,7 @@ class BuyingGroupScraper:
                     "method": "GET",
                     "v": "acj"
                 },
-                "serverMemo": {
-                    "children": [],
-                    "errors": {},
-                    "htmlHash": "",
-                    "data": {
-                        "deals": [],
-                        "commitments": commitments
-                    },
-                    "dataMeta": {
-                        "modelCollections": {
-                            "deals": {
-                                "class": "App\\Models\\Deal",
-                                "id": all_deal_ids,
-                                "relations": ["store", "commitments"],
-                                "connection": "mysql",
-                                "collectionClass": None
-                            }
-                        }
-                    },
-                    "checksum": ""
-                },
+                "serverMemo": initial_server_memo,
                 "updates": [
                     {
                         "type": "syncInput",
@@ -631,6 +652,7 @@ class BuyingGroupScraper:
             
             if sync_response.status_code != 200:
                 self.logger.warning(f"Sync input failed with status {sync_response.status_code}")
+                self.logger.error(f"Full sync response: {sync_response.text}")
                 return False
             
             # Parse the response to get updated serverMemo
@@ -678,27 +700,7 @@ class BuyingGroupScraper:
                     "method": "GET",
                     "v": "acj"
                 },
-                "serverMemo": {
-                    "children": [],
-                    "errors": {},
-                    "htmlHash": "",
-                    "data": {
-                        "deals": [],
-                        "commitments": commitments
-                    },
-                    "dataMeta": {
-                        "modelCollections": {
-                            "deals": {
-                                "class": "App\\Models\\Deal",
-                                "id": all_deal_ids,
-                                "relations": ["store", "commitments"],
-                                "connection": "mysql",
-                                "collectionClass": None
-                            }
-                        }
-                    },
-                    "checksum": ""
-                },
+                "serverMemo": server_memo,
                 "updates": [
                     {
                         "type": "callMethod",
