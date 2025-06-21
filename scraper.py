@@ -314,7 +314,17 @@ class BuyingGroupScraper:
                         store = store_text.split("From:")[1].strip()
                 
                 if title == deal['title'] and store == deal['store']:
-                    # Look for the commit button with wire:click attribute
+                    # Check if this deal is already committed (has "You have committed to purchase" text)
+                    committed_text = card.find('span', class_='leading-8')
+                    is_already_committed = False
+                    if committed_text:
+                        text = committed_text.get_text(strip=True)
+                        if "You have committed to purchase" in text:
+                            is_already_committed = True
+                            self.logger.info(f"Deal {deal['title']} is already committed, skipping auto-commit")
+                            return True  # Already committed, consider this a success
+                    
+                    # Look for the commit button with wire:click attribute (for new deals)
                     commit_button = card.find('button', attrs={'wire:click': re.compile(r'commit\(\d+\)')})
                     
                     if commit_button:
@@ -490,10 +500,15 @@ class BuyingGroupScraper:
                             self.logger.warning(f"Could not extract deal ID from wire:click for {deal['title']}")
                             return False
                     else:
-                        error_msg = f"Could not find commit button with wire:click for deal {deal['title']}\nStack trace:\n{traceback.format_exc()}"
-                        DiscordNotifier().send_error_notification(error_msg)
-                        self.logger.warning(f"Could not find commit button with wire:click for deal {deal['title']}")
-                        return False
+                        # No commit button found - this could be an already committed deal or a deal without commit functionality
+                        if is_already_committed:
+                            self.logger.info(f"Deal {deal['title']} is already committed, skipping auto-commit")
+                            return True  # Already committed, consider this a success
+                        else:
+                            error_msg = f"Could not find commit button with wire:click for deal {deal['title']}\nStack trace:\n{traceback.format_exc()}"
+                            DiscordNotifier().send_error_notification(error_msg)
+                            self.logger.warning(f"Could not find commit button with wire:click for deal {deal['title']}")
+                            return False
             
             error_msg = f"Could not find deal card for: {deal['title']}\nStack trace:\n{traceback.format_exc()}"
             DiscordNotifier().send_error_notification(error_msg)
