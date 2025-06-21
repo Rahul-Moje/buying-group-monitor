@@ -298,12 +298,14 @@ class BuyingGroupScraper:
     def auto_commit_deal(self, deal: Dict) -> bool:
         """Automatically commit to a deal by submitting the form. Sends Discord error notifications on failure or special cases."""
         try:
-            # Find the commit form for this deal
+            # First, verify the deal is still available on the dashboard
+            self.logger.info(f"Verifying deal {deal['title']} is still available before attempting auto-commit...")
             response = self.session.get(BUYING_GROUP_DASHBOARD_URL)
             response.raise_for_status()
             soup = BeautifulSoup(response.text, 'html.parser')
             deal_cards = soup.find_all('div', class_='group relative flex flex-col overflow-hidden rounded-lg border border-gray-200 bg-white')
             
+            deal_found = False
             for card in deal_cards:
                 title_elem = card.find('h3', class_='text-sm font-medium text-gray-900')
                 title = title_elem.get_text(strip=True) if title_elem else ""
@@ -315,6 +317,7 @@ class BuyingGroupScraper:
                         store = store_text.split("From:")[1].strip()
                 
                 if title == deal['title'] and store == deal['store']:
+                    deal_found = True
                     # Check if this deal is already committed (has "You have committed to purchase" text)
                     committed_text = card.find('span', class_='leading-8')
                     is_already_committed = False
@@ -440,6 +443,9 @@ class BuyingGroupScraper:
                                 self.logger.info(f"Response status: {commit_response.status_code}")
                                 self.logger.info(f"Response URL: {commit_response.url}")
                                 
+                                # Log full response for debugging
+                                self.logger.debug(f"Response text: {commit_response.text}")
+                                
                                 if commit_response.status_code == 200:
                                     # Check for "Must buy X or more" error in response
                                     response_text = commit_response.text.lower()
@@ -474,8 +480,7 @@ class BuyingGroupScraper:
                                             if commit_response2.status_code == 200:
                                                 retry_text = commit_response2.text.lower()
                                                 if "must buy" not in retry_text and "error" not in retry_text:
-                                                    success_msg = f"Auto-commit succeeded for {deal['title']} with quantity {min_qty}"
-                                                    self.logger.info(success_msg)
+                                                    self.logger.info(f"Auto-commit succeeded for {deal['title']} with quantity {min_qty}")
                                                     return True
                                                 else:
                                                     self.logger.warning(f"Auto-commit retry failed for {deal['title']} with quantity {min_qty}. Response: {retry_text[:200]}")
@@ -516,10 +521,66 @@ class BuyingGroupScraper:
                                                 if alt_response.status_code == 200:
                                                     self.logger.info("Alternative endpoint succeeded!")
                                                     return True
+                                                else:
+                                                    self.logger.warning(f"Alternative endpoint also failed with status {alt_response.status_code}")
                                             except Exception as alt_e:
                                                 self.logger.error(f"Alternative endpoint failed: {alt_e}")
+                                        
+                                        # If both endpoints fail, check if deal is still available
+                                        self.logger.info("Checking if deal is still available on dashboard...")
+                                        try:
+                                            dashboard_response = self.session.get(BUYING_GROUP_DASHBOARD_URL)
+                                            if dashboard_response.status_code == 200:
+                                                dashboard_soup = BeautifulSoup(dashboard_response.text, 'html.parser')
+                                                deal_cards = dashboard_soup.find_all('div', class_='group relative flex flex-col overflow-hidden rounded-lg border border-gray-200 bg-white')
+                                                
+                                                deal_found = False
+                                                for card in deal_cards:
+                                                    title_elem = card.find('h3', class_='text-sm font-medium text-gray-900')
+                                                    card_title = title_elem.get_text(strip=True) if title_elem else ""
+                                                    store_elem = card.find('p', class_='text-sm italic')
+                                                    card_store = ""
+                                                    if store_elem:
+                                                        store_text = store_elem.get_text(strip=True)
+                                                        if "From:" in store_text:
+                                                            card_store = store_text.split("From:")[1].strip()
+                                                    
+                                                    if card_title == deal['title'] and card_store == deal['store']:
+                                                        deal_found = True
+                                                        # Check if deal is already committed
+                                                        committed_text = card.find('span', class_='leading-8')
+                                                        if committed_text:
+                                                            text = committed_text.get_text(strip=True)
+                                                            if "You have committed to purchase" in text:
+                                                                self.logger.info(f"Deal {deal['title']} is already committed, skipping auto-commit")
+                                                                return True
+                                                        break
+                                                
+                                                if not deal_found:
+                                                    self.logger.warning(f"Deal {deal['title']} is no longer available on dashboard - may have expired or been removed")
+                                                    return False
+                                                else:
+                                                    self.logger.warning(f"Deal {deal['title']} is still available but Livewire endpoints are not responding")
+                                                    return False
+                                            else:
+                                                self.logger.error(f"Failed to check dashboard status: {dashboard_response.status_code}")
+                                                return False
+                                        except Exception as check_e:
+                                            self.logger.error(f"Error checking deal availability: {check_e}")
+                                            return False
                                     
-                                    return False
+                                    # If we get here, both Livewire endpoints failed but deal is still available
+                                    # Try form-based submission as a last resort
+                                    self.logger.info("Livewire API failed, trying form-based submission...")
+                                    if csrf_token and isinstance(csrf_token, str):
+                                        if self._try_form_submission(deal, deal_id, csrf_token):
+                                            return True
+                                        else:
+                                            self.logger.warning(f"All commit methods failed for {deal['title']}")
+                                            return False
+                                    else:
+                                        self.logger.warning(f"Invalid CSRF token for form submission: {csrf_token}")
+                                        return False
                             else:
                                 self.logger.warning(f"Could not find CSRF token for commit for {deal['title']}")
                                 return False
@@ -535,9 +596,99 @@ class BuyingGroupScraper:
                             self.logger.warning(f"Could not find commit button with wire:click for deal {deal['title']}")
                             return False
             
+            if not deal_found:
+                self.logger.warning(f"Deal {deal['title']} is no longer available on dashboard - may have expired or been removed")
+                return False
+            
             self.logger.warning(f"Could not find deal card for: {deal['title']}")
             return False
             
         except Exception as e:
             self.logger.error(f"Error during auto-commit for {deal.get('title', 'Unknown')}: {e}")
+            return False
+    
+    def _try_form_submission(self, deal: Dict, deal_id: str, csrf_token: str) -> bool:
+        """Try form-based submission as an alternative to Livewire API."""
+        try:
+            self.logger.info(f"Attempting form-based submission for deal {deal_id}")
+            
+            # Get the dashboard page again to get fresh form data
+            response = self.session.get(BUYING_GROUP_DASHBOARD_URL)
+            response.raise_for_status()
+            soup = BeautifulSoup(response.text, 'html.parser')
+            
+            # Find the form for this specific deal
+            deal_cards = soup.find_all('div', class_='group relative flex flex-col overflow-hidden rounded-lg border border-gray-200 bg-white')
+            
+            for card in deal_cards:
+                title_elem = card.find('h3', class_='text-sm font-medium text-gray-900')
+                title = title_elem.get_text(strip=True) if title_elem else ""
+                store_elem = card.find('p', class_='text-sm italic')
+                store = ""
+                if store_elem:
+                    store_text = store_elem.get_text(strip=True)
+                    if "From:" in store_text:
+                        store = store_text.split("From:")[1].strip()
+                
+                if title == deal['title'] and store == deal['store']:
+                    # Find the quantity input field
+                    quantity_input = card.find('input', {'type': 'number'})
+                    if quantity_input:
+                        input_name = quantity_input.get('name', '')
+                        self.logger.info(f"Found quantity input with name: {input_name}")
+                        
+                        # Prepare form data
+                        form_data = {
+                            '_token': csrf_token,
+                            input_name: AUTO_COMMIT_QUANTITY
+                        }
+                        
+                        # Try to find the form action URL
+                        form = card.find('form')
+                        if form:
+                            action_url = form.get('action', '')
+                            if action_url:
+                                if not action_url.startswith('http'):
+                                    action_url = f"https://buyinggroup.ca{action_url}"
+                                
+                                self.logger.info(f"Submitting form to: {action_url}")
+                                
+                                headers = {
+                                    'Content-Type': 'application/x-www-form-urlencoded',
+                                    'X-CSRF-TOKEN': csrf_token,
+                                    'Referer': BUYING_GROUP_DASHBOARD_URL
+                                }
+                                
+                                form_response = self.session.post(
+                                    action_url,
+                                    data=form_data,
+                                    headers=headers
+                                )
+                                
+                                self.logger.info(f"Form submission status: {form_response.status_code}")
+                                self.logger.debug(f"Form response: {form_response.text[:500]}")
+                                
+                                if form_response.status_code == 200:
+                                    # Check if submission was successful
+                                    if "error" not in form_response.text.lower():
+                                        self.logger.info(f"Form submission succeeded for {deal['title']}")
+                                        return True
+                                    else:
+                                        self.logger.warning(f"Form submission returned error for {deal['title']}")
+                                        return False
+                                else:
+                                    self.logger.warning(f"Form submission failed with status {form_response.status_code}")
+                                    return False
+                            else:
+                                self.logger.warning("No form action URL found")
+                                return False
+                        else:
+                            self.logger.warning("No form found in deal card")
+                            return False
+            
+            self.logger.warning("Could not find deal card for form submission")
+            return False
+            
+        except Exception as e:
+            self.logger.error(f"Error during form submission: {e}")
             return False 
