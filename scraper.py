@@ -353,234 +353,18 @@ class BuyingGroupScraper:
                                     csrf_token = csrf_input.get('value')
                             
                             if csrf_token:
-                                # Find the Livewire component ID from the deals section
-                                livewire_component = soup.find('div', attrs={'wire:id': True})
-                                livewire_id = None
-                                if livewire_component and hasattr(livewire_component, 'get') and not isinstance(livewire_component, str):
-                                    livewire_id = livewire_component.get('wire:id')
+                                # Use form-based submission instead of Livewire API
+                                self.logger.info(f"Attempting form-based commit for deal {deal_id} with quantity {AUTO_COMMIT_QUANTITY}")
                                 
-                                # Use the correct Livewire endpoint with component ID
-                                if livewire_id:
-                                    update_url = f"https://buyinggroup.ca/livewire/message/{livewire_id}"
-                                else:
-                                    # Fallback to general endpoint
-                                    update_url = "https://buyinggroup.ca/livewire/message"
-                                
-                                self.logger.info(f"Attempting to commit deal {deal_id} with quantity {AUTO_COMMIT_QUANTITY}")
-                                self.logger.info(f"Using Livewire endpoint: {update_url}")
-                                self.logger.info(f"Livewire component ID: {livewire_id}")
-                                
-                                # Prepare Livewire message data
-                                headers = {
-                                    'Content-Type': 'application/json',
-                                    'X-CSRF-TOKEN': csrf_token,
-                                    'X-Requested-With': 'XMLHttpRequest',
-                                    'Accept': 'application/json, text/plain, */*',
-                                    'Referer': BUYING_GROUP_DASHBOARD_URL
-                                }
-                                
-                                # Create Livewire message payload
-                                json_data = {
-                                    'fingerprint': {
-                                        'id': livewire_id or 'Hy2SMEBM7YAQ3sHJyzo9',
-                                        'name': 'app.dashboard.deals',
-                                        'locale': 'en',
-                                        'path': '/',
-                                        'method': 'GET',
-                                        'v': 'acj'
-                                    },
-                                    'serverMemo': {
-                                        'children': [],
-                                        'errors': {},
-                                        'htmlHash': '',
-                                        'data': {
-                                            'deals': [],
-                                            'commitments': {
-                                                deal_id: {
-                                                    'amount': AUTO_COMMIT_QUANTITY,
-                                                    'editing': True,
-                                                    'max': 10  # Default max, will be updated by server
-                                                }
-                                            }
-                                        },
-                                        'dataMeta': {
-                                            'modelCollections': {
-                                                'deals': {
-                                                    'class': 'App\\Models\\Deal',
-                                                    'id': [int(deal_id)],
-                                                    'relations': ['store', 'commitments'],
-                                                    'connection': 'mysql',
-                                                    'collectionClass': None
-                                                }
-                                            }
-                                        },
-                                        'checksum': ''
-                                    },
-                                    'updates': [
-                                        {
-                                            'type': 'callMethod',
-                                            'payload': {
-                                                'id': f'commit-{deal_id}',
-                                                'method': 'commit',
-                                                'params': [int(deal_id)]
-                                            }
-                                        }
-                                    ]
-                                }
-                                
-                                # Log the request details for debugging
-                                self.logger.debug(f"Request URL: {update_url}")
-                                self.logger.debug(f"Request headers: {headers}")
-                                self.logger.debug(f"Request data: {json_data}")
-                                
-                                # First attempt with default quantity
-                                commit_response = self.session.post(
-                                    update_url,
-                                    json=json_data,
-                                    headers=headers
-                                )
-                                
-                                self.logger.info(f"Response status: {commit_response.status_code}")
-                                self.logger.info(f"Response URL: {commit_response.url}")
-                                
-                                # Log full response for debugging
-                                self.logger.debug(f"Response text: {commit_response.text}")
-                                
-                                if commit_response.status_code == 200:
-                                    # Check for "Must buy X or more" error in response
-                                    response_text = commit_response.text.lower()
-                                    if "must buy" in response_text and "or more" in response_text:
-                                        # Extract minimum quantity and retry
-                                        patterns = [
-                                            r'must buy (\d+) or more',
-                                            r'minimum (\d+)',
-                                            r'at least (\d+)',
-                                            r'buy (\d+) or more'
-                                        ]
-                                        
-                                        min_qty = None
-                                        for pattern in patterns:
-                                            match = re.search(pattern, response_text)
-                                            if match:
-                                                min_qty = int(match.group(1))
-                                                break
-                                        
-                                        if min_qty and min_qty > AUTO_COMMIT_QUANTITY:
-                                            self.logger.warning(f"Auto-commit failed for {deal['title']}: Must buy at least {min_qty}. Retrying with {min_qty}.")
-                                            
-                                            # Retry with the correct minimum quantity
-                                            json_data['serverMemo']['data']['commitments'][deal_id]['amount'] = min_qty
-                                            
-                                            commit_response2 = self.session.post(
-                                                update_url,
-                                                json=json_data,
-                                                headers=headers
-                                            )
-                                            
-                                            if commit_response2.status_code == 200:
-                                                retry_text = commit_response2.text.lower()
-                                                if "must buy" not in retry_text and "error" not in retry_text:
-                                                    self.logger.info(f"Auto-commit succeeded for {deal['title']} with quantity {min_qty}")
-                                                    return True
-                                                else:
-                                                    self.logger.warning(f"Auto-commit retry failed for {deal['title']} with quantity {min_qty}. Response: {retry_text[:200]}")
-                                                    return False
-                                            else:
-                                                self.logger.warning(f"Auto-commit retry failed with status {commit_response2.status_code} for {deal['title']}")
-                                                return False
-                                        else:
-                                            self.logger.warning(f"Auto-commit failed for {deal['title']}: Could not determine minimum quantity from response: {response_text[:200]}")
-                                            return False
-                                    else:
-                                        # No "Must buy" error, commit was successful
-                                        self.logger.info(f"Auto-commit succeeded for {deal['title']} with quantity {AUTO_COMMIT_QUANTITY}")
+                                if isinstance(csrf_token, str):
+                                    if self._try_form_submission(deal, deal_id, csrf_token):
                                         return True
-                                else:
-                                    self.logger.warning(f"Commit failed with status {commit_response.status_code} for {deal['title']}")
-                                    
-                                    # Add detailed debugging for 404 errors
-                                    if commit_response.status_code == 404:
-                                        self.logger.error(f"404 Error Details:")
-                                        self.logger.error(f"  Request URL: {update_url}")
-                                        self.logger.error(f"  Livewire ID: {livewire_id}")
-                                        self.logger.error(f"  Deal ID: {deal_id}")
-                                        self.logger.error(f"  Response URL: {commit_response.url}")
-                                        self.logger.error(f"  Response text: {commit_response.text[:500]}")
-                                        
-                                        # Try alternative endpoint
-                                        alternative_url = "https://buyinggroup.ca/livewire/message"
-                                        if update_url != alternative_url:
-                                            self.logger.info(f"Trying alternative endpoint: {alternative_url}")
-                                            try:
-                                                alt_response = self.session.post(
-                                                    alternative_url,
-                                                    json=json_data,
-                                                    headers=headers
-                                                )
-                                                self.logger.info(f"Alternative response status: {alt_response.status_code}")
-                                                if alt_response.status_code == 200:
-                                                    self.logger.info("Alternative endpoint succeeded!")
-                                                    return True
-                                                else:
-                                                    self.logger.warning(f"Alternative endpoint also failed with status {alt_response.status_code}")
-                                            except Exception as alt_e:
-                                                self.logger.error(f"Alternative endpoint failed: {alt_e}")
-                                        
-                                        # If both endpoints fail, check if deal is still available
-                                        self.logger.info("Checking if deal is still available on dashboard...")
-                                        try:
-                                            dashboard_response = self.session.get(BUYING_GROUP_DASHBOARD_URL)
-                                            if dashboard_response.status_code == 200:
-                                                dashboard_soup = BeautifulSoup(dashboard_response.text, 'html.parser')
-                                                deal_cards = dashboard_soup.find_all('div', class_='group relative flex flex-col overflow-hidden rounded-lg border border-gray-200 bg-white')
-                                                
-                                                deal_found = False
-                                                for card in deal_cards:
-                                                    title_elem = card.find('h3', class_='text-sm font-medium text-gray-900')
-                                                    card_title = title_elem.get_text(strip=True) if title_elem else ""
-                                                    store_elem = card.find('p', class_='text-sm italic')
-                                                    card_store = ""
-                                                    if store_elem:
-                                                        store_text = store_elem.get_text(strip=True)
-                                                        if "From:" in store_text:
-                                                            card_store = store_text.split("From:")[1].strip()
-                                                    
-                                                    if card_title == deal['title'] and card_store == deal['store']:
-                                                        deal_found = True
-                                                        # Check if deal is already committed
-                                                        committed_text = card.find('span', class_='leading-8')
-                                                        if committed_text:
-                                                            text = committed_text.get_text(strip=True)
-                                                            if "You have committed to purchase" in text:
-                                                                self.logger.info(f"Deal {deal['title']} is already committed, skipping auto-commit")
-                                                                return True
-                                                        break
-                                                
-                                                if not deal_found:
-                                                    self.logger.warning(f"Deal {deal['title']} is no longer available on dashboard - may have expired or been removed")
-                                                    return False
-                                                else:
-                                                    self.logger.warning(f"Deal {deal['title']} is still available but Livewire endpoints are not responding")
-                                                    return False
-                                            else:
-                                                self.logger.error(f"Failed to check dashboard status: {dashboard_response.status_code}")
-                                                return False
-                                        except Exception as check_e:
-                                            self.logger.error(f"Error checking deal availability: {check_e}")
-                                            return False
-                                    
-                                    # If we get here, both Livewire endpoints failed but deal is still available
-                                    # Try form-based submission as a last resort
-                                    self.logger.info("Livewire API failed, trying form-based submission...")
-                                    if csrf_token and isinstance(csrf_token, str):
-                                        if self._try_form_submission(deal, deal_id, csrf_token):
-                                            return True
-                                        else:
-                                            self.logger.warning(f"All commit methods failed for {deal['title']}")
-                                            return False
                                     else:
-                                        self.logger.warning(f"Invalid CSRF token for form submission: {csrf_token}")
+                                        self.logger.warning(f"Form submission failed for {deal['title']}")
                                         return False
+                                else:
+                                    self.logger.warning(f"Invalid CSRF token type: {type(csrf_token)}")
+                                    return False
                             else:
                                 self.logger.warning(f"Could not find CSRF token for commit for {deal['title']}")
                                 return False
@@ -631,27 +415,60 @@ class BuyingGroupScraper:
                         store = store_text.split("From:")[1].strip()
                 
                 if title == deal['title'] and store == deal['store']:
+                    self.logger.info(f"Found matching deal card for form submission")
+                    
                     # Find the quantity input field
                     quantity_input = card.find('input', {'type': 'number'})
                     if quantity_input:
                         input_name = quantity_input.get('name', '')
-                        self.logger.info(f"Found quantity input with name: {input_name}")
+                        input_id = quantity_input.get('id', '')
+                        self.logger.info(f"Found quantity input - name: {input_name}, id: {input_id}")
                         
-                        # Prepare form data
-                        form_data = {
-                            '_token': csrf_token,
-                            input_name: AUTO_COMMIT_QUANTITY
-                        }
-                        
-                        # Try to find the form action URL
-                        form = card.find('form')
-                        if form:
-                            action_url = form.get('action', '')
-                            if action_url:
+                        # Look for the commit button to get the form action
+                        commit_button = card.find('button', attrs={'wire:click': re.compile(r'commit\(\d+\)')})
+                        if commit_button:
+                            wire_click = commit_button.get('wire:click', '')
+                            self.logger.info(f"Found commit button with wire:click: {wire_click}")
+                            
+                            # Try to find a form that contains this button
+                            form = commit_button.find_parent('form')
+                            if not form:
+                                # Look for any form in the card
+                                form = card.find('form')
+                            
+                            if form:
+                                action_url = form.get('action', '')
+                                method = form.get('method', 'POST').upper()
+                                self.logger.info(f"Found form - action: {action_url}, method: {method}")
+                                
+                                if not action_url:
+                                    # If no action, try posting to the dashboard URL
+                                    action_url = BUYING_GROUP_DASHBOARD_URL
+                                    self.logger.info(f"No form action found, using dashboard URL: {action_url}")
+                                
                                 if not action_url.startswith('http'):
                                     action_url = f"https://buyinggroup.ca{action_url}"
                                 
+                                # Prepare form data
+                                form_data = {
+                                    '_token': csrf_token
+                                }
+                                
+                                # Add quantity field if we found one
+                                if input_name:
+                                    form_data[input_name] = str(AUTO_COMMIT_QUANTITY)
+                                elif input_id:
+                                    form_data[input_id] = str(AUTO_COMMIT_QUANTITY)
+                                else:
+                                    # Try common field names
+                                    form_data['quantity'] = str(AUTO_COMMIT_QUANTITY)
+                                    form_data['amount'] = str(AUTO_COMMIT_QUANTITY)
+                                
+                                # Add deal ID if we have it
+                                form_data['deal_id'] = str(deal_id)
+                                
                                 self.logger.info(f"Submitting form to: {action_url}")
+                                self.logger.info(f"Form data: {form_data}")
                                 
                                 headers = {
                                     'Content-Type': 'application/x-www-form-urlencoded',
@@ -670,7 +487,8 @@ class BuyingGroupScraper:
                                 
                                 if form_response.status_code == 200:
                                     # Check if submission was successful
-                                    if "error" not in form_response.text.lower():
+                                    response_text = form_response.text.lower()
+                                    if "error" not in response_text and "failed" not in response_text:
                                         self.logger.info(f"Form submission succeeded for {deal['title']}")
                                         return True
                                     else:
@@ -680,11 +498,14 @@ class BuyingGroupScraper:
                                     self.logger.warning(f"Form submission failed with status {form_response.status_code}")
                                     return False
                             else:
-                                self.logger.warning("No form action URL found")
+                                self.logger.warning("No form found in deal card")
                                 return False
                         else:
-                            self.logger.warning("No form found in deal card")
+                            self.logger.warning("No commit button found in deal card")
                             return False
+                    else:
+                        self.logger.warning("No quantity input found in deal card")
+                        return False
             
             self.logger.warning("Could not find deal card for form submission")
             return False
