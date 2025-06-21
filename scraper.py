@@ -353,15 +353,20 @@ class BuyingGroupScraper:
                                     csrf_token = csrf_input.get('value')
                             
                             if csrf_token:
-                                # Use the correct Livewire API based on actual browser requests
-                                self.logger.info(f"Attempting Livewire API commit for deal {deal_id} with quantity {AUTO_COMMIT_QUANTITY}")
+                                self.logger.info(f"Found CSRF token: {csrf_token[:10]}...")
                                 
+                                # Try Livewire API first
                                 if isinstance(csrf_token, str):
                                     if self._try_livewire_api(deal, deal_id, csrf_token):
                                         return True
                                     else:
-                                        self.logger.warning(f"Livewire API failed for {deal['title']}")
-                                        return False
+                                        self.logger.warning(f"Livewire API failed for {deal['title']}, trying form submission...")
+                                        # Fallback to form submission
+                                        if self._try_form_submission(deal, deal_id, csrf_token):
+                                            return True
+                                        else:
+                                            self.logger.error(f"Both Livewire API and form submission failed for {deal['title']}")
+                                            return False
                                 else:
                                     self.logger.warning(f"Invalid CSRF token type: {type(csrf_token)}")
                                     return False
@@ -532,7 +537,19 @@ class BuyingGroupScraper:
             
             if not livewire_id:
                 self.logger.warning("Could not find Livewire component ID")
-                return False
+                # Try alternative method to find Livewire ID
+                livewire_scripts = soup.find_all('script')
+                for script in livewire_scripts:
+                    if script.string and 'wire:id' in script.string:
+                        id_match = re.search(r'wire:id["\']:\s*["\']([^"\']+)["\']', script.string)
+                        if id_match:
+                            livewire_id = id_match.group(1)
+                            self.logger.info(f"Found Livewire ID from script: {livewire_id}")
+                            break
+                
+                if not livewire_id:
+                    self.logger.error("Could not find Livewire component ID in any location")
+                    return False
             
             self.logger.info(f"Found Livewire component ID: {livewire_id}")
             
@@ -652,7 +669,8 @@ class BuyingGroupScraper:
             
             if sync_response.status_code != 200:
                 self.logger.warning(f"Sync input failed with status {sync_response.status_code}")
-                self.logger.error(f"Full sync response: {sync_response.text}")
+                # Only log a short message, not the full HTML
+                self.logger.error(f"Sync response contained error page (status {sync_response.status_code})")
                 return False
             
             # Parse the response to get updated serverMemo

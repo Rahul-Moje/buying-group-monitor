@@ -186,14 +186,14 @@ class BuyingGroupMonitor:
                     # This is a new deal
                     new_deals.append(deal)
                     
-                    # Auto-commit if enabled
-                    if AUTO_COMMIT_NEW_DEALS:
-                        self.logger.info(f"Attempting auto-commit for new deal: {deal['title']}")
-                        if self.scraper.auto_commit_deal(deal):
-                            deal['your_commitment'] = AUTO_COMMIT_QUANTITY
-                            self.logger.info(f"Auto-commit successful for: {deal['title']}")
-                        else:
-                            self.logger.warning(f"Auto-commit failed for: {deal['title']}")
+                    # Auto-commit if enabled (DISABLED)
+                    # if AUTO_COMMIT_NEW_DEALS:
+                    #     self.logger.info(f"Attempting auto-commit for new deal: {deal['title']}")
+                    #     if self.scraper.auto_commit_deal(deal):
+                    #         deal['your_commitment'] = AUTO_COMMIT_QUANTITY
+                    #         self.logger.info(f"Auto-commit successful for: {deal['title']}")
+                    #     else:
+                    #         self.logger.warning(f"Auto-commit failed for: {deal['title']}")
                 else:
                     # Check if quantity has changed
                     existing_deal = next((d for d in existing_deals if d['deal_id'] == deal['deal_id']), None)
