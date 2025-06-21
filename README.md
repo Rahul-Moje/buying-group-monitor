@@ -21,7 +21,6 @@ A Python-based monitoring system for the [Canada Buying Group](https://buyinggro
 - **Discord Error Notifications**: All warnings and errors are sent to Discord with full stack traces for debugging
 - **Comprehensive Logging**: All activity is logged to a file (see `LOG_FILE` in `.env`). For Render, use `/tmp/buying_group_monitor.log`.
 - **Network Resilience**: Configurable retry logic with exponential backoff for network requests
-- **Test Coverage**: Run `python main.py test` to verify all core features work as expected.
 
 ## Prerequisites
 
@@ -149,36 +148,16 @@ DATABASE_PATH=/tmp/buying_group_deals.db
 DEBUG=false
 ```
 
-## Local Testing
+## Local Usage
 
-### Run All Tests
+### Start the Monitor
 ```bash
-python main.py test
+python main.py start
 ```
 
-### Test Login Credentials
+### Check Monitor Status
 ```bash
-python main.py test-login
-```
-
-### Run a Single Check
-```bash
-python main.py check
-```
-
-### View Statistics
-```bash
-python main.py stats
-```
-
-### View Commitments
-```bash
-python main.py list-commitments
-```
-
-### Update Commitment
-```bash
-python main.py update-commitment <deal_id> <new_quantity>
+python main.py status
 ```
 
 ## Configuration Options
@@ -219,7 +198,6 @@ buying-group-monitor/
 ├── notifier.py          # Discord notifications
 ├── config.py            # Configuration management
 ├── logger.py            # Logging setup
-├── tests.py             # Test cases
 ├── deploy_cloud.py      # Cloud deployment setup
 ├── requirements.txt     # Python dependencies
 ├── env_example.txt      # Environment variables example
@@ -231,8 +209,8 @@ buying-group-monitor/
 
 ### Login Issues
 - Verify your credentials in the `.env` file
-- Run `python main.py test-login` to test authentication
 - Check if the buying group website is accessible
+- Ensure your account is active and not locked
 
 ### No Deals Found
 - The website structure might have changed
@@ -280,16 +258,6 @@ If you encounter issues:
 2. Verify your configuration is correct
 3. Test your login credentials
 4. Check if the website structure has changed
-
-## Running Tests
-
-To run all test cases and verify your setup:
-
-```bash
-python main.py test
-```
-
-All tests should pass. If any fail, check your environment variables and database schema.
 
 ## Recommended LOG_FILE for Cloud
 

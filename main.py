@@ -60,7 +60,7 @@ def start_health_server(port=8000):
 def main():
     """Main entry point."""
     parser = argparse.ArgumentParser(description='Buying Group Monitor')
-    parser.add_argument('command', choices=['start', 'test', 'status'], 
+    parser.add_argument('command', choices=['start', 'status'], 
                        help='Command to run')
     parser.add_argument('--port', type=int, default=8000,
                        help='Port for health check server (default: 8000)')
@@ -70,30 +70,7 @@ def main():
     # Setup logging
     logger = setup_logger()
     
-    if args.command == 'test':
-        logger.info("Running tests...")
-        try:
-            import tests
-            import unittest
-            
-            # Run all tests
-            loader = unittest.TestLoader()
-            suite = loader.loadTestsFromModule(tests)
-            runner = unittest.TextTestRunner(verbosity=2)
-            result = runner.run(suite)
-            
-            if result.wasSuccessful():
-                logger.info("All tests passed!")
-                sys.exit(0)
-            else:
-                logger.error("Some tests failed!")
-                sys.exit(1)
-                
-        except Exception as e:
-            logger.error(f"Error running tests: {e}", exc_info=True)
-            sys.exit(1)
-    
-    elif args.command == 'status':
+    if args.command == 'status':
         logger.info("Getting monitor status...")
         try:
             monitor = BuyingGroupMonitor()
