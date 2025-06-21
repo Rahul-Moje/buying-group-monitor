@@ -1,26 +1,86 @@
 import requests
-from typing import List, Dict
-from config import DISCORD_WEBHOOK_URL
+import logging
+from typing import List, Dict, Optional
+from config import DISCORD_WEBHOOK_URL, REQUEST_TIMEOUT, MAX_RETRIES, RETRY_DELAY
+import time
 
 class DiscordNotifier:
     def __init__(self, webhook_url: str = DISCORD_WEBHOOK_URL):
         self.webhook_url = webhook_url
+        self.logger = logging.getLogger(__name__)
+    
+    def _make_request_with_retry(self, url: str, json_data: dict) -> Optional[requests.Response]:
+        """Make HTTP request with retry logic and proper error handling."""
+        for attempt in range(MAX_RETRIES + 1):
+            try:
+                response = requests.post(url, json=json_data, timeout=REQUEST_TIMEOUT)
+                response.raise_for_status()
+                return response
+            except requests.exceptions.RequestException as e:
+                self.logger.warning(f"Discord request attempt {attempt + 1} failed: {e}")
+                if attempt < MAX_RETRIES:
+                    time.sleep(RETRY_DELAY * (2 ** attempt))  # Exponential backoff
+                else:
+                    self.logger.error(f"All {MAX_RETRIES + 1} Discord request attempts failed")
+                    return None
+        return None
+    
+    def _validate_deal_data(self, deal: Dict) -> bool:
+        """Validate deal data before sending to Discord."""
+        required_fields = ['title', 'store', 'price', 'max_quantity']
+        for field in required_fields:
+            if field not in deal or deal[field] is None:
+                self.logger.warning(f"Deal missing required field: {field}")
+                return False
+        return True
+    
+    def _sanitize_deal_data(self, deal: Dict) -> Dict:
+        """Sanitize deal data for Discord embed."""
+        sanitized = deal.copy()
+        
+        # Ensure link is valid
+        link = deal.get('link', '')
+        if not link or not link.startswith(('http://', 'https://')):
+            link = "No link available"
+        sanitized['link'] = link
+        
+        # Ensure delivery_date is not None
+        sanitized['delivery_date'] = deal.get('delivery_date', 'N/A')
+        
+        # Truncate title if too long
+        if len(sanitized['title']) > 100:
+            sanitized['title'] = sanitized['title'][:97] + "..."
+        
+        return sanitized
     
     def send_new_deals_notification(self, deals: List[Dict]) -> bool:
         """Send notification about new deals."""
         if not self.webhook_url:
-            print("No Discord webhook URL configured")
+            self.logger.warning("No Discord webhook URL configured - notifications disabled")
             return False
         
         if not deals:
+            self.logger.info("No deals to notify about")
             return True
         
         try:
+            # Validate and sanitize all deals
+            valid_deals = []
+            for deal in deals:
+                if self._validate_deal_data(deal):
+                    valid_deals.append(self._sanitize_deal_data(deal))
+                else:
+                    self.logger.warning(f"Skipping invalid deal: {deal.get('title', 'Unknown')}")
+            
+            if not valid_deals:
+                self.logger.warning("No valid deals to send notification for")
+                return False
+            
             # Create embed for Discord
             embed = {
                 "title": "🆕 New Buying Group Deals Available!",
                 "color": 0x00ff00,  # Green color
-                "description": f"Found {len(deals)} new deal(s) on the buying group!",
+                "description": f"Found {len(valid_deals)} new deal(s) on the buying group!",
                 "fields": [],
                 "footer": {
                     "text": "Buying Group Monitor"
@@ -29,9 +89,9 @@ class DiscordNotifier:
             }
             
             # Add each deal as a field
-            for deal in deals:
+            for deal in valid_deals:
                 field = {
-                    "name": f"💰 {deal['title'][:100]}...",
+                    "name": f"💰 {deal['title']}",
                     "value": f"**Store:** {deal['store']}\n"
                             f"**Price:** ${deal['price']:.2f}\n"
                             f"**Max Quantity:** {deal['max_quantity']}\n"
@@ -46,36 +106,44 @@ class DiscordNotifier:
                 "embeds": [embed]
             }
             
-            response = requests.post(self.webhook_url, json=payload)
-            response.raise_for_status()
-            
-            print(f"Successfully sent notification for {len(deals)} new deals")
-            return True
+            response = self._make_request_with_retry(self.webhook_url, payload)
+            if response:
+                self.logger.info(f"Successfully sent notification for {len(valid_deals)} new deals")
+                return True
+            else:
+                self.logger.error("Failed to send Discord notification after all retries")
+                return False
             
         except Exception as e:
-            print(f"Error sending Discord notification: {e}")
+            self.logger.error(f"Error sending Discord notification: {e}", exc_info=True)
             return False
     
     def send_deal_update_notification(self, deal: Dict, old_quantity: int, new_quantity: int) -> bool:
         """Send notification about deal quantity updates."""
         if not self.webhook_url:
-            print("No Discord webhook URL configured")
+            self.logger.warning("No Discord webhook URL configured - notifications disabled")
+            return False
+        
+        if not self._validate_deal_data(deal):
+            self.logger.warning("Invalid deal data for update notification")
             return False
         
         try:
+            sanitized_deal = self._sanitize_deal_data(deal)
+            
             embed = {
                 "title": "📊 Deal Quantity Updated",
                 "color": 0xffa500,  # Orange color
-                "description": f"Quantity changed for: **{deal['title']}**",
+                "description": f"Quantity changed for: **{sanitized_deal['title']}**",
                 "fields": [
                     {
                         "name": "Store",
-                        "value": deal['store'],
+                        "value": sanitized_deal['store'],
                         "inline": True
                     },
                     {
                         "name": "Price",
-                        "value": f"${deal['price']:.2f}",
+                        "value": f"${sanitized_deal['price']:.2f}",
                         "inline": True
                     },
                     {
@@ -85,12 +153,12 @@ class DiscordNotifier:
                     },
                     {
                         "name": "Max Quantity",
-                        "value": str(deal['max_quantity']),
+                        "value": str(sanitized_deal['max_quantity']),
                         "inline": True
                     },
                     {
                         "name": "Link",
-                        "value": f"[Click Here]({deal['link']})",
+                        "value": f"[Click Here]({sanitized_deal['link']})",
                         "inline": True
                     }
                 ],
@@ -103,23 +171,29 @@ class DiscordNotifier:
                 "embeds": [embed]
             }
             
-            response = requests.post(self.webhook_url, json=payload)
-            response.raise_for_status()
-            
-            print(f"Successfully sent quantity update notification for {deal['title']}")
-            return True
+            response = self._make_request_with_retry(self.webhook_url, payload)
+            if response:
+                self.logger.info(f"Successfully sent quantity update notification for {sanitized_deal['title']}")
+                return True
+            else:
+                self.logger.error("Failed to send quantity update notification after all retries")
+                return False
             
         except Exception as e:
-            print(f"Error sending quantity update notification: {e}")
+            self.logger.error(f"Error sending quantity update notification: {e}", exc_info=True)
             return False
     
     def send_error_notification(self, error_message: str) -> bool:
         """Send notification about errors."""
         if not self.webhook_url:
-            print("No Discord webhook URL configured")
+            self.logger.warning("No Discord webhook URL configured - error notifications disabled")
             return False
         
         try:
+            # Truncate error message if too long
+            if len(error_message) > 1000:
+                error_message = error_message[:997] + "..."
+            
             embed = {
                 "title": "❌ Buying Group Monitor Error",
                 "color": 0xff0000,  # Red color
@@ -133,20 +207,22 @@ class DiscordNotifier:
                 "embeds": [embed]
             }
             
-            response = requests.post(self.webhook_url, json=payload)
-            response.raise_for_status()
-            
-            print("Successfully sent error notification")
-            return True
+            response = self._make_request_with_retry(self.webhook_url, payload)
+            if response:
+                self.logger.info("Successfully sent error notification")
+                return True
+            else:
+                self.logger.error("Failed to send error notification after all retries")
+                return False
             
         except Exception as e:
-            print(f"Error sending error notification: {e}")
+            self.logger.error(f"Error sending error notification: {e}", exc_info=True)
             return False
     
     def send_startup_notification(self) -> bool:
         """Send notification when the monitor starts up."""
         if not self.webhook_url:
-            print("No Discord webhook URL configured")
+            self.logger.warning("No Discord webhook URL configured - startup notifications disabled")
             return False
         
         try:
@@ -163,14 +239,16 @@ class DiscordNotifier:
                 "embeds": [embed]
             }
             
-            response = requests.post(self.webhook_url, json=payload)
-            response.raise_for_status()
-            
-            print("Successfully sent startup notification")
-            return True
+            response = self._make_request_with_retry(self.webhook_url, payload)
+            if response:
+                self.logger.info("Successfully sent startup notification")
+                return True
+            else:
+                self.logger.error("Failed to send startup notification after all retries")
+                return False
             
         except Exception as e:
-            print(f"Error sending startup notification: {e}")
+            self.logger.error(f"Error sending startup notification: {e}", exc_info=True)
             return False
     
     def send_all_deals_summary(self, deals: List[Dict]) -> bool:
@@ -272,4 +350,33 @@ class DiscordNotifier:
             
         except Exception as e:
             print(f"Error sending commitment update notification: {e}")
+            return False
+    
+    def send_warning_notification(self, warning_message: str) -> bool:
+        """Send a warning notification to Discord."""
+        if not self.webhook_url:
+            self.logger.warning("No Discord webhook URL configured - warning notifications disabled")
+            return False
+        try:
+            # Truncate warning message if too long
+            if len(warning_message) > 1000:
+                warning_message = warning_message[:997] + "..."
+            embed = {
+                "title": "⚠️ Buying Group Monitor Warning",
+                "color": 0xffcc00,  # Yellow color
+                "description": f"A warning occurred while monitoring the buying group:\n```{warning_message}```",
+                "footer": {
+                    "text": "Buying Group Monitor"
+                }
+            }
+            payload = {"embeds": [embed]}
+            response = self._make_request_with_retry(self.webhook_url, payload)
+            if response:
+                self.logger.info("Successfully sent warning notification")
+                return True
+            else:
+                self.logger.error("Failed to send warning notification after all retries")
+                return False
+        except Exception as e:
+            self.logger.error(f"Error sending warning notification: {e}", exc_info=True)
             return False 

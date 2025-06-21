@@ -16,3 +16,15 @@ AUTO_COMMIT_QUANTITY=1
 # Logging Configuration
 LOG_LEVEL=INFO
 LOG_FILE=buying_group_monitor.log
+
+# Debug Configuration (optional - for troubleshooting)
+# Set to 'true' to see detailed debug information including credentials
+DEBUG=false
+
+# Database Configuration (optional)
+DATABASE_PATH=buying_group_deals.db
+
+# Network Configuration (optional - advanced settings)
+REQUEST_TIMEOUT=30
+MAX_RETRIES=3
+RETRY_DELAY=5

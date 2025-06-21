@@ -1,5 +1,7 @@
 import requests
 import re
+import time
+import os
 from bs4 import BeautifulSoup
 from typing import List, Dict, Optional
 from config import (
@@ -9,30 +11,66 @@ from config import (
     PASSWORD, 
     DEFAULT_HEADERS,
     AUTO_COMMIT_NEW_DEALS,
-    AUTO_COMMIT_QUANTITY
+    AUTO_COMMIT_QUANTITY,
+    REQUEST_TIMEOUT,
+    MAX_RETRIES,
+    RETRY_DELAY
 )
 import hashlib
+import logging
 
 class BuyingGroupScraper:
     def __init__(self):
         self.session = requests.Session()
         self.session.headers.update(DEFAULT_HEADERS)
         self.is_authenticated = False
+        self.logger = logging.getLogger(__name__)
+        
+        # Configure retry strategy
+        retry_strategy = requests.adapters.HTTPAdapter(
+            max_retries=requests.packages.urllib3.util.Retry(
+                total=MAX_RETRIES,
+                backoff_factor=RETRY_DELAY,
+                status_forcelist=[429, 500, 502, 503, 504]
+            )
+        )
+        self.session.mount("http://", retry_strategy)
+        self.session.mount("https://", retry_strategy)
+    
+    def _make_request_with_retry(self, method: str, url: str, **kwargs) -> Optional[requests.Response]:
+        """Make HTTP request with retry logic and proper error handling."""
+        for attempt in range(MAX_RETRIES + 1):
+            try:
+                kwargs.setdefault('timeout', REQUEST_TIMEOUT)
+                response = getattr(self.session, method.lower())(url, **kwargs)
+                response.raise_for_status()
+                return response
+            except requests.exceptions.RequestException as e:
+                self.logger.warning(f"Request attempt {attempt + 1} failed: {e}")
+                if attempt < MAX_RETRIES:
+                    time.sleep(RETRY_DELAY * (2 ** attempt))  # Exponential backoff
+                else:
+                    self.logger.error(f"All {MAX_RETRIES + 1} request attempts failed")
+                    return None
+        return None
     
     def login(self) -> bool:
         """Login to the buying group website."""
         try:
-            print(f"Attempting to login with username: {USERNAME}")
-            print(f"Using username: {USERNAME}")
-            print(f"Using password: {'*' * len(PASSWORD) if PASSWORD else '(empty)'}")
+            if os.getenv('DEBUG', 'false').lower() == 'true':
+                self.logger.debug(f"Attempting to login with username: {USERNAME}")
+                self.logger.debug(f"Using password: {'*' * len(PASSWORD) if PASSWORD else '(empty)'}")
             
             # First, get the login page to extract CSRF token
-            print("Getting login page...")
-            login_response = self.session.get(BUYING_GROUP_LOGIN_URL)
-            login_response.raise_for_status()
+            self.logger.info("Getting login page...")
+            login_response = self._make_request_with_retry('GET', BUYING_GROUP_LOGIN_URL)
             
-            print(f"Login page status: {login_response.status_code}")
-            print(f"Login page URL: {login_response.url}")
+            if not login_response:
+                self.logger.error("Failed to get login page")
+                return False
+            
+            self.logger.debug(f"Login page status: {login_response.status_code}")
+            self.logger.debug(f"Login page URL: {login_response.url}")
             
             soup = BeautifulSoup(login_response.text, 'html.parser')
             
@@ -42,20 +80,20 @@ class BuyingGroupScraper:
             if csrf_input and hasattr(csrf_input, 'get'):
                 csrf_token = csrf_input.get('value')
                 if csrf_token:
-                    print(f"Found CSRF token: {csrf_token[:20]}...")
+                    self.logger.debug(f"Found CSRF token: {csrf_token[:20]}...")
                 else:
-                    print("CSRF input found but no value attribute")
+                    self.logger.warning("CSRF input found but no value attribute")
             else:
-                print("Could not find CSRF token input field")
+                self.logger.warning("Could not find CSRF token input field")
                 # Let's look for other possible token fields
                 all_inputs = [inp for inp in soup.find_all('input') if hasattr(inp, 'get')]
-                print(f"Found {len(all_inputs)} input fields:")
+                self.logger.debug(f"Found {len(all_inputs)} input fields:")
                 for inp in all_inputs:
                     name = inp.get('name', 'no-name')
-                    print(f"  - {name}")
+                    self.logger.debug(f"  - {name}")
             
             if not csrf_token:
-                print("Could not find CSRF token")
+                self.logger.error("Could not find CSRF token")
                 return False
             
             # Prepare login data
@@ -66,48 +104,54 @@ class BuyingGroupScraper:
                 'remember': 'on'
             }
             
-            print("Submitting login form...")
+            self.logger.info("Submitting login form...")
             # Add Referer header to mimic browser behavior
             headers = dict(self.session.headers)
             headers['Referer'] = BUYING_GROUP_LOGIN_URL
             
             # Perform login as application/x-www-form-urlencoded
-            login_response = self.session.post(
+            login_response = self._make_request_with_retry(
+                'POST',
                 BUYING_GROUP_LOGIN_URL,
                 data=login_data,
                 headers=headers,
                 allow_redirects=True
             )
             
-            print(f"Login response status: {login_response.status_code}")
-            print(f"Login response URL: {login_response.url}")
+            if not login_response:
+                self.logger.error("Failed to submit login form")
+                return False
+            
+            self.logger.debug(f"Login response status: {login_response.status_code}")
+            self.logger.debug(f"Login response URL: {login_response.url}")
             
             # Check if login was successful
             if login_response.status_code == 200:
                 # Check if we're redirected to dashboard or still on login page
                 if 'dashboard' in login_response.url.lower() or 'login' not in login_response.url.lower():
                     self.is_authenticated = True
-                    print("Successfully logged in to buying group")
+                    self.logger.info("Successfully logged in to buying group")
                     return True
                 else:
-                    print("Login failed - still on login page")
+                    self.logger.warning("Login failed - still on login page")
                     # Let's check if there are any error messages
                     soup = BeautifulSoup(login_response.text, 'html.parser')
                     error_messages = soup.find_all(class_=re.compile(r'error|alert|danger'))
                     if error_messages:
-                        print("Error messages found:")
+                        self.logger.warning("Error messages found:")
                         for error in error_messages:
-                            print(f"  - {error.get_text(strip=True)}")
-                    print("--- Login Page HTML Start ---")
-                    print(login_response.text)
-                    print("--- Login Page HTML End ---")
+                            self.logger.warning(f"  - {error.get_text(strip=True)}")
+                    if os.getenv('DEBUG', 'false').lower() == 'true':
+                        self.logger.debug("--- Login Page HTML Start ---")
+                        self.logger.debug(login_response.text)
+                        self.logger.debug("--- Login Page HTML End ---")
                     return False
             else:
-                print(f"Login failed with status code: {login_response.status_code}")
+                self.logger.error(f"Login failed with status code: {login_response.status_code}")
                 return False
                 
         except Exception as e:
-            print(f"Error during login: {e}")
+            self.logger.error(f"Error during login: {e}", exc_info=True)
             return False
     
     def get_deals(self) -> List[Dict]:
@@ -118,8 +162,11 @@ class BuyingGroupScraper:
         
         try:
             # Get the dashboard page
-            response = self.session.get(BUYING_GROUP_DASHBOARD_URL)
-            response.raise_for_status()
+            response = self._make_request_with_retry('GET', BUYING_GROUP_DASHBOARD_URL)
+            
+            if not response:
+                self.logger.error("Failed to get dashboard page")
+                return []
             
             soup = BeautifulSoup(response.text, 'html.parser')
             
@@ -132,10 +179,11 @@ class BuyingGroupScraper:
                 if deal:
                     deals.append(deal)
             
+            self.logger.info(f"Found {len(deals)} deals on the dashboard")
             return deals
             
         except Exception as e:
-            print(f"Error scraping deals: {e}")
+            self.logger.error(f"Error scraping deals: {e}", exc_info=True)
             return []
     
     def _extract_deal_from_card(self, card) -> Optional[Dict]:
@@ -198,6 +246,19 @@ class BuyingGroupScraper:
             deal_text = f"{store}_{title}".lower().strip()
             deal_id = hashlib.md5(deal_text.encode()).hexdigest()[:16]
             
+            # Validate required fields
+            if not title or title == "Unknown Title":
+                self.logger.warning("Deal card missing title")
+                return None
+            
+            if not store or store == "Unknown Store":
+                self.logger.warning("Deal card missing store information")
+                return None
+            
+            # Sanitize link
+            if link and not link.startswith(('http://', 'https://')):
+                link = f"https://buyinggroup.ca{link}" if link.startswith('/') else ""
+            
             return {
                 'deal_id': deal_id,
                 'title': title,
@@ -210,7 +271,7 @@ class BuyingGroupScraper:
             }
             
         except Exception as e:
-            print(f"Error extracting deal from card: {e}")
+            self.logger.error(f"Error extracting deal from card: {e}", exc_info=True)
             return None
     
     def check_authentication(self) -> bool:
@@ -222,85 +283,106 @@ class BuyingGroupScraper:
             return False
     
     def auto_commit_deal(self, deal: Dict) -> bool:
-        """Automatically commit to a deal by submitting the form."""
+        """Automatically commit to a deal by submitting the form. Sends Discord warning on failure or special cases."""
         try:
             # Find the commit form for this deal
             response = self.session.get(BUYING_GROUP_DASHBOARD_URL)
             response.raise_for_status()
-            
             soup = BeautifulSoup(response.text, 'html.parser')
-            
-            # Find the deal card that matches our deal
             deal_cards = soup.find_all('div', class_='group relative flex flex-col overflow-hidden rounded-lg border border-gray-200 bg-white')
-            
             for card in deal_cards:
-                # Extract deal info from card to match
                 title_elem = card.find('h3', class_='text-sm font-medium text-gray-900')
                 title = title_elem.get_text(strip=True) if title_elem else ""
-                
                 store_elem = card.find('p', class_='text-sm italic')
                 store = ""
                 if store_elem:
                     store_text = store_elem.get_text(strip=True)
                     if "From:" in store_text:
                         store = store_text.split("From:")[1].strip()
-                
-                # Check if this is the deal we want to commit to
                 if title == deal['title'] and store == deal['store']:
-                    # Find the form in this card
                     form = card.find('form')
                     if form:
-                        # Extract form action and method
                         action = form.get('action', '')
                         method = form.get('method', 'post').lower()
-                        
-                        # Find CSRF token
                         csrf_input = form.find('input', {'name': '_token'})
                         csrf_token = csrf_input.get('value') if csrf_input else None
-                        
                         if not csrf_token:
-                            # Try to get CSRF token from the page
                             page_csrf = soup.find('meta', {'name': 'csrf-token'})
                             if page_csrf:
                                 csrf_token = page_csrf.get('content')
-                        
                         if csrf_token:
-                            # Prepare commit data
                             commit_data = {
                                 '_token': csrf_token,
                                 'quantity': AUTO_COMMIT_QUANTITY
                             }
-                            
-                            # Find additional form fields
                             for input_field in form.find_all('input'):
                                 name = input_field.get('name')
                                 value = input_field.get('value')
                                 if name and name not in commit_data:
                                     commit_data[name] = value
-                            
-                            # Submit the commit
+                            commit_url = action if action.startswith('http') else f"https://buyinggroup.ca{action}"
                             if method == 'post':
-                                commit_url = action if action.startswith('http') else f"https://buyinggroup.ca{action}"
                                 commit_response = self.session.post(commit_url, data=commit_data)
                             else:
-                                commit_url = action if action.startswith('http') else f"https://buyinggroup.ca{action}"
                                 commit_response = self.session.get(commit_url, params=commit_data)
-                            
                             if commit_response.status_code == 200:
+                                # Check for special error in response text
+                                if "Must buy" in commit_response.text and "or more" in commit_response.text:
+                                    import re
+                                    match = re.search(r'Must buy (\d+) or more', commit_response.text)
+                                    if match:
+                                        min_qty = int(match.group(1))
+                                        warning_msg = f"Auto-commit failed for {deal['title']}: Must buy at least {min_qty}. Retrying with {min_qty}."
+                                        from notifier import DiscordNotifier
+                                        DiscordNotifier().send_warning_notification(warning_msg)
+                                        self.logger.warning(warning_msg)
+                                        if min_qty > AUTO_COMMIT_QUANTITY:
+                                            commit_data['quantity'] = min_qty
+                                            if method == 'post':
+                                                commit_response2 = self.session.post(commit_url, data=commit_data)
+                                            else:
+                                                commit_response2 = self.session.get(commit_url, params=commit_data)
+                                            if commit_response2.status_code == 200 and "Must buy" not in commit_response2.text:
+                                                self.logger.info(f"Auto-commit succeeded for {deal['title']} with quantity {min_qty}")
+                                                return True
+                                            else:
+                                                error_msg = f"Auto-commit retry failed for {deal['title']} with quantity {min_qty}."
+                                                DiscordNotifier().send_warning_notification(error_msg)
+                                                self.logger.warning(error_msg)
+                                                return False
+                                    else:
+                                        error_msg = f"Auto-commit failed for {deal['title']}: Unknown minimum quantity required."
+                                        from notifier import DiscordNotifier
+                                        DiscordNotifier().send_warning_notification(error_msg)
+                                        self.logger.warning(error_msg)
+                                        return False
                                 return True
                             else:
-                                print(f"Commit failed with status {commit_response.status_code}")
+                                error_msg = f"Commit failed with status {commit_response.status_code} for {deal['title']}"
+                                from notifier import DiscordNotifier
+                                DiscordNotifier().send_warning_notification(error_msg)
+                                self.logger.warning(error_msg)
                                 return False
                         else:
-                            print("Could not find CSRF token for commit")
+                            error_msg = f"Could not find CSRF token for commit for {deal['title']}"
+                            from notifier import DiscordNotifier
+                            DiscordNotifier().send_warning_notification(error_msg)
+                            self.logger.warning(error_msg)
                             return False
                     else:
-                        print("Could not find commit form for deal")
+                        error_msg = f"Could not find commit form for deal {deal['title']}"
+                        from notifier import DiscordNotifier
+                        DiscordNotifier().send_warning_notification(error_msg)
+                        self.logger.warning(error_msg)
                         return False
-            
-            print(f"Could not find deal card for: {deal['title']}")
+            error_msg = f"Could not find deal card for: {deal['title']}"
+            from notifier import DiscordNotifier
+            DiscordNotifier().send_warning_notification(error_msg)
+            self.logger.warning(error_msg)
             return False
-            
         except Exception as e:
-            print(f"Error during auto-commit: {e}")
+            error_msg = f"Error during auto-commit for {deal.get('title', 'Unknown')}: {e}"
+            from notifier import DiscordNotifier
+            DiscordNotifier().send_warning_notification(error_msg)
+            self.logger.error(error_msg)
             return False 

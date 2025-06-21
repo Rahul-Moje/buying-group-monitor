@@ -7,18 +7,45 @@ This script monitors the buying group website for new deals and sends notificati
 
 import argparse
 import sys
-import threading
-import time
+import os
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from monitor import BuyingGroupMonitor
+from logger import setup_logger
+from config import LOG_LEVEL, LOG_FILE
+import json
+import time
+import threading
 
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == '/health':
             self.send_response(200)
-            self.send_header('Content-type', 'text/plain')
+            self.send_header('Content-type', 'application/json')
             self.end_headers()
-            self.wfile.write(b'OK')
+            
+            response = {
+                'status': 'healthy',
+                'timestamp': time.time(),
+                'service': 'Buying Group Monitor'
+            }
+            self.wfile.write(json.dumps(response).encode())
+        elif self.path == '/status':
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.end_headers()
+            
+            # Get monitor status if available
+            try:
+                monitor = BuyingGroupMonitor()
+                status = monitor.get_status()
+                response = status
+            except Exception as e:
+                response = {
+                    'error': str(e),
+                    'status': 'error'
+                }
+            
+            self.wfile.write(json.dumps(response).encode())
         else:
             self.send_response(404)
             self.end_headers()
@@ -31,142 +58,75 @@ def start_health_server(port=8000):
     print(f"Health check server started on port {port}")
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Monitor buying group for new deals",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  python main.py start          # Start continuous monitoring
-  python main.py check          # Run a single check
-  python main.py stats          # Show statistics
-  python main.py test-login     # Test login credentials
-  python main.py update-commitment <deal_id> <new_quantity>  # Update commitment for a specific deal
-  python main.py summary        # Show summary of all deals
-  python main.py list-commitments  # List all deals with their current commitments
-        """
-    )
-    
-    parser.add_argument(
-        'command',
-        choices=['start', 'check', 'stats', 'test-login', 'send-summary', 'update-commitment', 'summary', 'list-commitments', 'test'],
-        help='Command to execute'
-    )
-    
-    parser.add_argument(
-        'deal_id',
-        nargs='?',
-        help='Deal ID for update-commitment command'
-    )
-    
-    parser.add_argument(
-        'new_quantity',
-        nargs='?',
-        help='New quantity for update-commitment command'
-    )
+    """Main entry point."""
+    parser = argparse.ArgumentParser(description='Buying Group Monitor')
+    parser.add_argument('command', choices=['start', 'test', 'status'], 
+                       help='Command to run')
+    parser.add_argument('--port', type=int, default=8000,
+                       help='Port for health check server (default: 8000)')
     
     args = parser.parse_args()
     
-    # Create monitor instance
-    monitor = BuyingGroupMonitor()
+    # Setup logging
+    logger = setup_logger()
     
-    try:
-        if args.command == 'start':
-            print("🚀 Starting Buying Group Monitor...")
-            # Start health check server for cloud deployment
-            start_health_server()
-            monitor.start_monitoring()
+    if args.command == 'test':
+        logger.info("Running tests...")
+        try:
+            import tests
+            import unittest
             
-        elif args.command == 'check':
-            print("🔍 Running single check...")
-            monitor.run_single_check()
+            # Run all tests
+            loader = unittest.TestLoader()
+            suite = loader.loadTestsFromModule(tests)
+            runner = unittest.TextTestRunner(verbosity=2)
+            result = runner.run(suite)
             
-        elif args.command == 'stats':
-            print("📊 Getting statistics...")
-            monitor.get_statistics()
-            
-        elif args.command == 'test-login':
-            print("🔐 Testing login credentials...")
-            if monitor.scraper.login():
-                print("✅ Login successful!")
-                deals = monitor.scraper.get_deals()
-                print(f"Found {len(deals)} deals")
-                if deals:
-                    print("Sample deal:")
-                    print(f"  Title: {deals[0]['title']}")
-                    print(f"  Store: {deals[0]['store']}")
-                    print(f"  Price: ${deals[0]['price']:.2f}")
+            if result.wasSuccessful():
+                logger.info("All tests passed!")
+                sys.exit(0)
             else:
-                print("❌ Login failed!")
+                logger.error("Some tests failed!")
                 sys.exit(1)
-        elif args.command == 'send-summary':
-            print("📋 Sending all active deals summary to Discord...")
-            deals = monitor.database.get_all_deals()
-            monitor.notifier.send_all_deals_summary(deals)
-        elif args.command == 'update-commitment':
-            if args.deal_id is None or args.new_quantity is None:
-                print("Usage: python main.py update-commitment <deal_id> <new_quantity>")
-                sys.exit(1)
+                
+        except Exception as e:
+            logger.error(f"Error running tests: {e}", exc_info=True)
+            sys.exit(1)
+    
+    elif args.command == 'status':
+        logger.info("Getting monitor status...")
+        try:
+            monitor = BuyingGroupMonitor()
+            status = monitor.get_status()
+            print("Monitor Status:")
+            print(f"  Running: {status['running']}")
+            print(f"  Health: {status['health']}")
+            print(f"  Config: {status['config']}")
+        except Exception as e:
+            logger.error(f"Error getting status: {e}", exc_info=True)
+            sys.exit(1)
+    
+    elif args.command == 'start':
+        logger.info("Starting Buying Group Monitor...")
+        
+        try:
+            # Create monitor instance
+            monitor = BuyingGroupMonitor()
             
-            deal_id = args.deal_id
-            try:
-                new_quantity = int(args.new_quantity)
-            except ValueError:
-                print("Error: Quantity must be a number")
-                sys.exit(1)
+            # Start health check server
+            start_health_server(args.port)
             
-            # Get the deal from database
-            deal = monitor.database.get_deal_by_id(deal_id)
-            if not deal:
-                print(f"Error: Deal with ID {deal_id} not found")
-                sys.exit(1)
+            # Start the monitor
+            monitor.start()
             
-            old_commitment = deal.get('your_commitment', 0)
-            
-            # Update commitment in database
-            monitor.database.update_your_commitment(deal_id, new_quantity)
-            
-            # Send notification about the change
-            monitor.notifier.send_commitment_update_notification(deal, old_commitment, new_quantity)
-            
-            print(f"Updated commitment for {deal['title']}: {old_commitment} → {new_quantity}")
-            print("Notification sent to Discord")
-        elif args.command == 'summary':
-            print("📋 Showing summary of all deals...")
-            deals = monitor.database.get_all_deals()
-            monitor.notifier.send_all_deals_summary(deals)
-        elif args.command == 'list-commitments':
-            print("📋 Your current commitments:")
-            deals = monitor.database.get_all_deals()
-            
-            if not deals:
-                print("No deals found in database")
-                return
-            
-            for deal in deals:
-                commitment = deal.get('your_commitment', 0)
-                if commitment > 0:
-                    print(f"• {deal['title']} ({deal['store']}) - ${deal['price']:.2f} - Qty: {commitment}")
-                else:
-                    print(f"• {deal['title']} ({deal['store']}) - ${deal['price']:.2f} - No commitment")
-        elif args.command == 'test':
-            print("🧪 Running test cases...")
-            try:
-                from tests import run_tests
-                success = run_tests()
-                if success:
-                    print("✅ All tests passed!")
-                else:
-                    print("❌ Some tests failed!")
-                    sys.exit(1)
-            except ImportError as e:
-                print(f"❌ Error importing tests: {e}")
-                sys.exit(1)
-    except KeyboardInterrupt:
-        print("\n🛑 Operation cancelled by user")
-        sys.exit(0)
-    except Exception as e:
-        print(f"❌ Error: {e}")
-        sys.exit(1)
+        except KeyboardInterrupt:
+            logger.info("Received interrupt, shutting down...")
+            if 'monitor' in locals():
+                monitor.stop()
+            sys.exit(0)
+        except Exception as e:
+            logger.error(f"Error starting monitor: {e}", exc_info=True)
+            sys.exit(1)
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main() 
