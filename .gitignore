@@ -60,4 +60,7 @@ logs/
 *.tmp
 *.temp
 
-logs.txt 
+logs.txt
+
+# Ignore sample files and folders
+samples/ 

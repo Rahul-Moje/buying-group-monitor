@@ -29,7 +29,6 @@ class DealDatabase:
                         price REAL NOT NULL,
                         max_quantity INTEGER NOT NULL,
                         current_quantity INTEGER DEFAULT 0,
-                        your_commitment INTEGER DEFAULT 0,
                         link TEXT,
                         delivery_date TEXT,
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -45,18 +44,6 @@ class DealDatabase:
                         sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )
                 ''')
-                
-                # Check if your_commitment column exists, add if not
-                cursor.execute("PRAGMA table_info(deals)")
-                columns = [column[1] for column in cursor.fetchall()]
-                
-                if 'your_commitment' not in columns:
-                    self.logger.info("Adding your_commitment column to deals table")
-                    cursor.execute('''
-                        ALTER TABLE deals 
-                        ADD COLUMN your_commitment INTEGER DEFAULT 0
-                    ''')
-                    self.logger.info("Successfully added your_commitment column")
                 
                 conn.commit()
                 self.logger.info("Database initialized successfully")
@@ -108,8 +95,8 @@ class DealDatabase:
                 cursor.execute('''
                     INSERT OR REPLACE INTO deals 
                     (deal_id, title, store, price, max_quantity, current_quantity, 
-                     your_commitment, link, delivery_date, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     link, delivery_date, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (
                     deal['deal_id'],
                     deal['title'],
@@ -117,7 +104,6 @@ class DealDatabase:
                     deal['price'],
                     deal['max_quantity'],
                     deal.get('current_quantity', 0),
-                    deal.get('your_commitment', 0),
                     deal.get('link', ''),
                     deal.get('delivery_date', ''),
                     datetime.now().isoformat()
@@ -142,7 +128,7 @@ class DealDatabase:
                 
                 cursor.execute('''
                     SELECT deal_id, title, store, price, max_quantity, 
-                           current_quantity, your_commitment, link, delivery_date,
+                           current_quantity, link, delivery_date,
                            created_at, updated_at
                     FROM deals 
                     ORDER BY created_at DESC
@@ -157,11 +143,10 @@ class DealDatabase:
                         'price': row[3],
                         'max_quantity': row[4],
                         'current_quantity': row[5],
-                        'your_commitment': row[6],
-                        'link': row[7],
-                        'delivery_date': row[8],
-                        'created_at': row[9],
-                        'updated_at': row[10]
+                        'link': row[6],
+                        'delivery_date': row[7],
+                        'created_at': row[8],
+                        'updated_at': row[9]
                     })
                 
                 self.logger.debug(f"Retrieved {len(deals)} deals from database")
@@ -183,7 +168,7 @@ class DealDatabase:
                 
                 cursor.execute('''
                     SELECT deal_id, title, store, price, max_quantity, 
-                           current_quantity, your_commitment, link, delivery_date,
+                           current_quantity, link, delivery_date,
                            created_at, updated_at
                     FROM deals 
                     WHERE deal_id = ?
@@ -198,11 +183,10 @@ class DealDatabase:
                         'price': row[3],
                         'max_quantity': row[4],
                         'current_quantity': row[5],
-                        'your_commitment': row[6],
-                        'link': row[7],
-                        'delivery_date': row[8],
-                        'created_at': row[9],
-                        'updated_at': row[10]
+                        'link': row[6],
+                        'delivery_date': row[7],
+                        'created_at': row[8],
+                        'updated_at': row[9]
                     }
                 return None
                 
@@ -247,38 +231,6 @@ class DealDatabase:
                 
         except Exception as e:
             self.logger.error(f"Error updating deal quantity: {e}", exc_info=True)
-            return False
-    
-    def update_your_commitment(self, deal_id: str, commitment: int) -> bool:
-        """Update your commitment quantity for a deal."""
-        if not deal_id or not isinstance(deal_id, str):
-            self.logger.warning("Invalid deal_id provided for commitment update")
-            return False
-        
-        if not isinstance(commitment, int) or commitment < 0:
-            self.logger.warning("Invalid commitment value provided")
-            return False
-        
-        try:
-            with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.cursor()
-                
-                cursor.execute('''
-                    UPDATE deals 
-                    SET your_commitment = ?, updated_at = ?
-                    WHERE deal_id = ?
-                ''', (commitment, datetime.now().isoformat(), deal_id))
-                
-                if cursor.rowcount > 0:
-                    conn.commit()
-                    self.logger.debug(f"Updated commitment for deal {deal_id} to {commitment}")
-                    return True
-                else:
-                    self.logger.warning(f"No deal found with ID {deal_id} for commitment update")
-                    return False
-                
-        except Exception as e:
-            self.logger.error(f"Error updating deal commitment: {e}", exc_info=True)
             return False
     
     def has_notification_been_sent(self, batch_id: str) -> bool:
@@ -348,7 +300,7 @@ class DealDatabase:
             cursor = conn.cursor()
             
             cursor.execute('''
-                SELECT deal_id, title, store, price, max_quantity, current_quantity, your_commitment, link, delivery_date, created_at, updated_at
+                SELECT deal_id, title, store, price, max_quantity, current_quantity, link, delivery_date, created_at, updated_at
                 FROM deals 
                 WHERE current_quantity > 0
                 ORDER BY created_at DESC

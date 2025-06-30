@@ -46,8 +46,6 @@ def log_monitoring_start(logger: logging.Logger):
     """Log monitoring session start."""
     logger.info("Buying Group Monitor started")
     logger.info(f"Check interval: {os.getenv('CHECK_INTERVAL_MINUTES', '5')} minutes")
-    logger.info(f"Auto-commit enabled: {os.getenv('AUTO_COMMIT_NEW_DEALS', 'true')}")
-    logger.info(f"Auto-commit quantity: {os.getenv('AUTO_COMMIT_QUANTITY', '1')}")
 
 def log_check_start(logger: logging.Logger):
     """Log the start of a monitoring check."""

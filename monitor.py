@@ -9,8 +9,6 @@ from notifier import DiscordNotifier
 from logger import setup_logger, log_monitoring_start, log_check_start, log_check_complete, log_error
 from config import (
     CHECK_INTERVAL_MINUTES, 
-    AUTO_COMMIT_NEW_DEALS, 
-    AUTO_COMMIT_QUANTITY,
     LOG_LEVEL,
     LOG_FILE
 )
@@ -185,15 +183,6 @@ class BuyingGroupMonitor:
                 if deal['deal_id'] not in existing_deal_ids:
                     # This is a new deal
                     new_deals.append(deal)
-                    
-                    # Auto-commit if enabled (DISABLED)
-                    # if AUTO_COMMIT_NEW_DEALS:
-                    #     self.logger.info(f"Attempting auto-commit for new deal: {deal['title']}")
-                    #     if self.scraper.auto_commit_deal(deal):
-                    #         deal['your_commitment'] = AUTO_COMMIT_QUANTITY
-                    #         self.logger.info(f"Auto-commit successful for: {deal['title']}")
-                    #     else:
-                    #         self.logger.warning(f"Auto-commit failed for: {deal['title']}")
                 else:
                     # Check if quantity has changed
                     existing_deal = next((d for d in existing_deals if d['deal_id'] == deal['deal_id']), None)
@@ -267,8 +256,6 @@ class BuyingGroupMonitor:
             'health': self._get_health_status(),
             'config': {
                 'check_interval_minutes': CHECK_INTERVAL_MINUTES,
-                'auto_commit_enabled': AUTO_COMMIT_NEW_DEALS,
-                'auto_commit_quantity': AUTO_COMMIT_QUANTITY,
                 'log_level': LOG_LEVEL,
                 'log_file': LOG_FILE
             }

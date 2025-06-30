@@ -9,10 +9,6 @@ DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/YOUR_WEBHOOK_URL_HERE
 # Monitoring Configuration
 CHECK_INTERVAL_MINUTES=5
 
-# Auto-Commit Configuration (automatically reserve items for new deals)
-AUTO_COMMIT_NEW_DEALS=true
-AUTO_COMMIT_QUANTITY=1
-
 # Logging Configuration
 LOG_LEVEL=INFO
 LOG_FILE=buying_group_monitor.log

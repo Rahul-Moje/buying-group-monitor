@@ -291,68 +291,6 @@ class DiscordNotifier:
             print(f"Error sending all deals summary: {e}")
             return False
     
-    def send_commitment_update_notification(self, deal: Dict, old_commitment: int, new_commitment: int) -> bool:
-        """Send notification about commitment quantity updates."""
-        if not self.webhook_url:
-            print("No Discord webhook URL configured")
-            return False
-        
-        try:
-            embed = {
-                "title": "📝 Commitment Updated",
-                "color": 0x9b59b6,  # Purple color
-                "description": f"Your commitment changed for: **{deal['title']}**",
-                "fields": [
-                    {
-                        "name": "Store",
-                        "value": deal['store'],
-                        "inline": True
-                    },
-                    {
-                        "name": "Price",
-                        "value": f"${deal['price']:.2f}",
-                        "inline": True
-                    },
-                    {
-                        "name": "Commitment Change",
-                        "value": f"{old_commitment} → {new_commitment}",
-                        "inline": True
-                    },
-                    {
-                        "name": "Max Available",
-                        "value": str(deal['max_quantity']),
-                        "inline": True
-                    },
-                    {
-                        "name": "Delivery",
-                        "value": deal.get('delivery_date', 'N/A'),
-                        "inline": True
-                    },
-                    {
-                        "name": "Link",
-                        "value": f"[Product Link]({deal.get('link', '')})",
-                        "inline": True
-                    }
-                ],
-                "footer": {
-                    "text": "Buying Group Monitor"
-                }
-            }
-            
-            payload = {
-                "embeds": [embed]
-            }
-            
-            response = requests.post(self.webhook_url, json=payload)
-            response.raise_for_status()
-            
-            print(f"Successfully sent commitment update notification for {deal['title']}")
-            return True
-            
-        except Exception as e:
-            print(f"Error sending commitment update notification: {e}")
-            return False
-    
     def send_warning_notification(self, warning_message: str) -> bool:
         """Send a warning notification to Discord."""
         if not self.webhook_url:

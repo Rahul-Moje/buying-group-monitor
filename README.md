@@ -1,23 +1,23 @@
 # Buying Group Monitor 🚀
 
-A Python-based monitoring system for the [Canada Buying Group](https://buyinggroup.ca/) that automatically checks for new deals and sends notifications via Discord.
+A Python-based monitoring system for the [Canada Buying Group](https://buyinggroup.ca/) and other deal/auction sites. It automatically checks for new deals and sends notifications via Discord.
 
 ## Features
 
-- 🔍 **Automatic Deal Monitoring**: Scrapes the buying group website for new deals
+- 🔍 **Automatic Deal Monitoring**: Scrapes supported websites for new deals
 - 📊 **Database Storage**: Stores deal information locally using SQLite
-- 🔔 **Discord Notifications**: Sends rich notifications when new deals are found
+- 🔔 **Discord Notifications**: Sends rich notifications when new deals or updates are found
 - ⏰ **Scheduled Monitoring**: Runs continuously with configurable intervals
 - 📈 **Statistics**: Track deal history and statistics
-- 🔐 **Secure Authentication**: Handles login sessions automatically
+- 🔒 **Secure Authentication**: Handles login sessions automatically
 - ☁️ **Cloud Deployment**: Run 24/7 on Railway or Render
-- 🤖 **Auto-Commit**: Automatically reserves items for new deals
+- 🧩 **Modular Scraper System**: Easily add support for new sites (e.g., 2ndTurn, more)
 - 🚨 **Error Handling**: Comprehensive error notifications with stack traces
-- 🔄 **Smart Retry Logic**: Handles minimum quantity requirements automatically
+- 🔄 **Smart Retry Logic**: Handles network issues with retry and backoff
 
 ## New Features (2024-06)
 
-- **Auto-Commit with Smart Error Handling**: Automatically reserves items and handles "Must buy X or more" errors with retry logic
+- **Modular Scraper Support**: Easily add new sites by implementing a new scraper class.
 - **Discord Error Notifications**: All warnings and errors are sent to Discord with full stack traces for debugging
 - **Comprehensive Logging**: All activity is logged to a file (see `LOG_FILE` in `.env`). For Render, use `/tmp/buying_group_monitor.log`.
 - **Network Resilience**: Configurable retry logic with exponential backoff for network requests
@@ -25,7 +25,7 @@ A Python-based monitoring system for the [Canada Buying Group](https://buyinggro
 ## Prerequisites
 
 - Python 3.7 or higher
-- Buying Group account credentials
+- Buying Group account credentials (or credentials for other supported sites)
 - Discord webhook URL (optional, for notifications)
 
 ## Installation
@@ -56,8 +56,6 @@ A Python-based monitoring system for the [Canada Buying Group](https://buyinggro
    BUYING_GROUP_PASSWORD=your_password
    DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/YOUR_WEBHOOK_URL
    CHECK_INTERVAL_MINUTES=5
-   AUTO_COMMIT_NEW_DEALS=true
-   AUTO_COMMIT_QUANTITY=1
    ```
 
 ## Discord Webhook Setup (Optional)
@@ -67,56 +65,23 @@ A Python-based monitoring system for the [Canada Buying Group](https://buyinggro
 3. Create a new webhook
 4. Copy the webhook URL and add it to your `.env` file
 
-## Auto-Commit Feature
-
-The monitor can automatically reserve items for new deals:
-
-- **Enabled by default**: Set `AUTO_COMMIT_NEW_DEALS=true`
-- **Configurable quantity**: Set `AUTO_COMMIT_QUANTITY=1` (or higher)
-- **Smart error handling**: Automatically detects "Must buy X or more" errors and retries with the correct quantity
-- **Discord notifications**: You'll get notified of all auto-commit attempts and results
-
-### Auto-Commit Error Handling
-
-When auto-commit encounters a minimum quantity requirement:
-1. **First attempt**: Tries with your configured quantity
-2. **Error detection**: Parses the error message to find minimum requirement
-3. **Retry attempt**: Automatically retries with the correct minimum quantity
-4. **Notification**: Sends Discord notification with the result
-
 ## Cloud Deployment (24/7 Operation)
 
 This monitor is designed to run on cloud platforms for 24/7 operation, even when your laptop is off.
 
-### Quick Setup
+### Recommended: Render or Railway
 
+- **Render**: Easiest for most users. Supports background workers, persistent storage, and has a free tier. Your project includes a `render.yaml` for one-click deployment.
+- **Railway**: Also easy, with a generous free tier and GitHub integration.
+
+#### Quick Setup (Render Example)
 ```bash
-# Generate cloud configuration files
-python deploy_cloud.py
-
-# Choose your platform:
-# 1. Railway (Free tier)
-# 2. Render (Free tier)
-# 3. Both Railway and Render
+# Push your code to GitHub
+# Go to https://render.com, create a new service, and connect your repo
+# Render will detect your render.yaml and set up the service
+# Set your environment variables in the dashboard
+# Deploy!
 ```
-
-### Railway Deployment
-
-1. **Sign up** at https://railway.app
-2. **Connect** your GitHub repository
-3. **Set environment variables** in Railway dashboard:
-   - `BUYING_GROUP_USERNAME`
-   - `BUYING_GROUP_PASSWORD`
-   - `DISCORD_WEBHOOK_URL`
-   - `CHECK_INTERVAL_MINUTES`
-4. **Deploy** - Railway will automatically build and run your monitor
-
-### Render Deployment
-
-1. **Sign up** at https://render.com
-2. **Connect** your GitHub repository
-3. **Set environment variables** in Render dashboard
-4. **Deploy** with one click
 
 ### Environment Variables for Cloud
 
@@ -128,8 +93,6 @@ Set these in your cloud platform's dashboard:
 | `BUYING_GROUP_PASSWORD` | Your buying group password | ✅ Yes | - |
 | `DISCORD_WEBHOOK_URL` | Discord webhook URL for notifications | ❌ No | - |
 | `CHECK_INTERVAL_MINUTES` | How often to check for new deals | ❌ No | 5 |
-| `AUTO_COMMIT_NEW_DEALS` | Enable auto-commit for new deals | ❌ No | true |
-| `AUTO_COMMIT_QUANTITY` | Default quantity for auto-commit | ❌ No | 1 |
 | `LOG_LEVEL` | Logging level (DEBUG, INFO, WARNING, ERROR) | ❌ No | INFO |
 | `LOG_FILE` | Log file path (use `/tmp/` for cloud) | ❌ No | buying_group_monitor.log |
 | `DEBUG` | Enable debug mode (shows credentials) | ❌ No | false |
@@ -141,7 +104,6 @@ Set these in your cloud platform's dashboard:
 ### Render-Specific Settings
 
 For Render deployment, use these values:
-
 ```env
 LOG_FILE=/tmp/buying_group_monitor.log
 DATABASE_PATH=/tmp/buying_group_deals.db
@@ -160,6 +122,17 @@ python main.py start
 python main.py status
 ```
 
+## Health and Status Endpoints
+- **/health**: Returns JSON with service health status (port 8000 by default)
+- **/status**: Returns JSON with current monitor status and config
+- You can change the port with `--port`, e.g. `python main.py start --port 9000`
+
+## Notification Logic
+- **You will only receive Discord notifications when:**
+  - New deals are detected (not previously seen)
+  - Existing deals have a quantity update
+- **No notification is sent if nothing changes** (no spam)
+
 ## Configuration Options
 
 | Variable | Description | Default |
@@ -168,8 +141,6 @@ python main.py status
 | `BUYING_GROUP_PASSWORD` | Your buying group password | Required |
 | `DISCORD_WEBHOOK_URL` | Discord webhook URL for notifications | Optional |
 | `CHECK_INTERVAL_MINUTES` | How often to check for new deals | 5 |
-| `AUTO_COMMIT_NEW_DEALS` | Enable auto-commit for new deals | true |
-| `AUTO_COMMIT_QUANTITY` | Default quantity for auto-commit | 1 |
 | `LOG_LEVEL` | Logging level | INFO |
 | `LOG_FILE` | Log file path | buying_group_monitor.log |
 | `DEBUG` | Enable debug mode | false |
@@ -179,13 +150,17 @@ python main.py status
 
 ## How It Works
 
-1. **Authentication**: The monitor logs into your buying group account
-2. **Scraping**: It scrapes the dashboard page for current deals
+1. **Authentication**: The monitor logs into your buying group account (or other supported site)
+2. **Scraping**: It scrapes the dashboard page for current deals using the appropriate scraper
 3. **Comparison**: New deals are compared against the local database
-4. **Auto-Commit**: If enabled, automatically reserves items for new deals
-5. **Error Handling**: Detects and handles minimum quantity requirements
-6. **Notifications**: Discord notifications are sent for new deals, errors, and auto-commit results
-7. **Storage**: All deal information is stored in SQLite database
+4. **Notifications**: Discord notifications are sent for new deals and updates
+5. **Storage**: All deal information is stored in SQLite database
+
+## Extending to New Sites
+- Implement a new scraper class for the target site (see `scraper.py` for an example)
+- Register the new scraper in the monitor
+- Ensure the new scraper returns deals in the standard format
+- Update config/CLI to allow selecting the site
 
 ## File Structure
 
@@ -193,7 +168,7 @@ python main.py status
 buying-group-monitor/
 ├── main.py              # Main entry point
 ├── monitor.py           # Core monitoring logic
-├── scraper.py           # Web scraping functionality
+├── scraper.py           # Web scraping functionality (modular)
 ├── database.py          # Database operations
 ├── notifier.py          # Discord notifications
 ├── config.py            # Configuration management
@@ -221,21 +196,6 @@ buying-group-monitor/
 - Verify your Discord webhook URL is correct
 - Check if the webhook is still active in Discord
 - Ensure the webhook has permission to send messages
-
-### Auto-Commit Issues
-- Check Discord for error notifications with stack traces
-- Verify minimum quantity requirements are being handled
-- Check logs for detailed error information
-
-### Cloud Deployment Issues
-- Check environment variables are set correctly
-- Verify the health check endpoint is working (`/health`)
-- Check cloud platform logs for errors
-- Ensure log file path uses `/tmp/` directory
-
-### Database Issues
-- The database file is created automatically
-- If corrupted, delete `buying_group_deals.db` and restart
 
 ## Security Notes
 
