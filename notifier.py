@@ -2,13 +2,12 @@ import requests
 import logging
 from typing import List, Dict, Optional
 from config import DISCORD_WEBHOOK_URL, REQUEST_TIMEOUT, MAX_RETRIES, RETRY_DELAY
-from logger import setup_logger
 import time
 
 class DiscordNotifier:
     def __init__(self, webhook_url: str = DISCORD_WEBHOOK_URL or ""):
         self.webhook_url = webhook_url
-        self.logger = setup_logger('discord_notifier')
+        self.logger = logging.getLogger('discord_notifier')
     
     def _make_request_with_retry(self, url: str, json_data: dict) -> Optional[requests.Response]:
         """Make HTTP request with retry logic and proper error handling."""

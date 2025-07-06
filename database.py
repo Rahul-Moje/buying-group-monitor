@@ -3,15 +3,15 @@ import json
 import logging
 from typing import List, Dict, Optional
 from config import S3_BUCKET, S3_KEY
-from logger import setup_logger
 from botocore.exceptions import ClientError
 import os
+from datetime import datetime
 
 class DealDatabase:
     def __init__(self, bucket: str = S3_BUCKET, key: str = S3_KEY):
         self.bucket = bucket
         self.key = key
-        self.logger = setup_logger('deal_database')
+        self.logger = logging.getLogger('deal_database')
         self.s3 = boto3.client('s3')
 
     def _load_deals(self) -> List[Dict]:

@@ -10,8 +10,8 @@ import sys
 import os
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from monitor import BuyingGroupMonitor
-from logger import setup_logger
-from config import LOG_LEVEL, LOG_FILE
+import logging
+from config import LOG_LEVEL
 import json
 import time
 import threading
@@ -68,7 +68,8 @@ def main():
     args = parser.parse_args()
     
     # Setup logging
-    logger = setup_logger()
+    logging.basicConfig(level=getattr(logging, LOG_LEVEL.upper()))
+    logger = logging.getLogger('main')
     
     if args.command == 'status':
         logger.info("Getting monitor status...")

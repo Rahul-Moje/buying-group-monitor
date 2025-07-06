@@ -17,11 +17,11 @@ from config import (
     S3_BUCKET,
     S3_KEY
 )
-from logger import setup_logger
+
 
 class BuyingGroupMonitor:
     def __init__(self):
-        self.logger = setup_logger('buying_group_monitor')
+        self.logger = logging.getLogger('buying_group_monitor')
         self.running = False
         self.scraper = BuyingGroupScraper()
         self.notifier = DiscordNotifier(DISCORD_WEBHOOK_URL) if DISCORD_WEBHOOK_URL else None

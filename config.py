@@ -28,7 +28,6 @@ DATABASE_PATH = os.getenv('DATABASE_PATH', 's3://buying-group-deals/deals.json')
 
 # Logging Configuration
 LOG_LEVEL = os.getenv('LOG_LEVEL', 'DEBUG')
-LOG_FILE = os.getenv('LOG_FILE', 'buying_group_monitor.log')
 
 # Network Configuration
 REQUEST_TIMEOUT = int(os.getenv('REQUEST_TIMEOUT', '30'))  # 30 seconds timeout

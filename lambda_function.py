@@ -1,13 +1,13 @@
 import json
 import boto3
 import os
-from datetime import datetime
 import logging
+from datetime import datetime
 from database import DealDatabase
 from scraper import BuyingGroupScraper
 from notifier import DiscordNotifier
 
-# Configure logging
+# Configure logging for Lambda
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
