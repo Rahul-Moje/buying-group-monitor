@@ -50,20 +50,8 @@ class BuyingGroupScraper:
     
     def _make_request_with_retry(self, method: str, url: str, **kwargs) -> Optional[requests.Response]:
         """Make HTTP request with retry logic and proper error handling."""
-        for attempt in range(MAX_RETRIES + 1):
-            try:
-                kwargs.setdefault('timeout', REQUEST_TIMEOUT)
-                response = getattr(self.session, method.lower())(url, **kwargs)
-                response.raise_for_status()
-                return response
-            except requests.exceptions.RequestException as e:
-                self.logger.warning(f"Request attempt {attempt + 1} failed: {e}")
-                if attempt < MAX_RETRIES:
-                    time.sleep(RETRY_DELAY * (2 ** attempt))  # Exponential backoff
-                else:
-                    self.logger.error(f"All {MAX_RETRIES + 1} request attempts failed")
-                    return None
-        return None
+        from utils import make_request_with_retry
+        return make_request_with_retry(method, url, self.logger, **kwargs)
     
     def login(self) -> bool:
         """Login to the buying group website."""

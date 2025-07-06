@@ -24,7 +24,7 @@ DISCORD_WEBHOOK_URL = os.getenv('DISCORD_WEBHOOK_URL')
 
 # Monitoring Configuration
 CHECK_INTERVAL_MINUTES = int(os.getenv('CHECK_INTERVAL_MINUTES', '5'))  # Check every 5 minutes by default
-DATABASE_PATH = os.getenv('DATABASE_PATH', 'buying_group_deals.db')
+DATABASE_PATH = os.getenv('DATABASE_PATH', 's3://buying-group-deals/deals.json')  # Use S3 for database
 
 # Logging Configuration
 LOG_LEVEL = os.getenv('LOG_LEVEL', 'DEBUG')
@@ -47,4 +47,8 @@ DEFAULT_HEADERS = {
     'DNT': '1',
     'Connection': 'keep-alive',
     'Upgrade-Insecure-Requests': '1',
-} 
+}
+
+# S3 Configuration
+S3_BUCKET = os.getenv('S3_BUCKET', 'buying-group-deals')
+S3_KEY = os.getenv('S3_KEY', 'deals.json') 

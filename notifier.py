@@ -12,19 +12,8 @@ class DiscordNotifier:
     
     def _make_request_with_retry(self, url: str, json_data: dict) -> Optional[requests.Response]:
         """Make HTTP request with retry logic and proper error handling."""
-        for attempt in range(MAX_RETRIES + 1):
-            try:
-                response = requests.post(url, json=json_data, timeout=REQUEST_TIMEOUT)
-                response.raise_for_status()
-                return response
-            except requests.exceptions.RequestException as e:
-                self.logger.warning(f"Discord request attempt {attempt + 1} failed: {e}")
-                if attempt < MAX_RETRIES:
-                    time.sleep(RETRY_DELAY * (2 ** attempt))  # Exponential backoff
-                else:
-                    self.logger.error(f"All {MAX_RETRIES + 1} Discord request attempts failed")
-                    return None
-        return None
+        from utils import make_request_with_retry
+        return make_request_with_retry('POST', url, self.logger, json=json_data)
     
     def _validate_deal_data(self, deal: Dict) -> bool:
         """Validate deal data before sending to Discord."""
