@@ -1,22 +1,17 @@
 import json
 import boto3
 import os
-import logging
 from datetime import datetime
 from database import DealDatabase
 from scraper import BuyingGroupScraper
 from notifier import DiscordNotifier
-
-# Configure logging for Lambda
-logger = logging.getLogger()
-logger.setLevel(logging.INFO)
 
 def lambda_handler(event, context):
     """
     Lambda function to monitor buying group deals
     """
     try:
-        logger.info("Starting buying group monitor...")
+        print("Starting buying group monitor...")
         
         # Get configuration from environment variables
         bucket_name = os.environ.get('S3_BUCKET', 'buying-group-deals')
@@ -40,7 +35,7 @@ def lambda_handler(event, context):
             if notifier:
                 notifier.send_new_deals_notification(new_deals)
             
-            logger.info(f"Found {len(new_deals)} new deals")
+            print(f"Found {len(new_deals)} new deals")
             return {
                 'statusCode': 200,
                 'body': json.dumps({
@@ -49,7 +44,7 @@ def lambda_handler(event, context):
                 })
             }
         else:
-            logger.info("No new deals found")
+            print("No new deals found")
             return {
                 'statusCode': 200,
                 'body': json.dumps({
@@ -58,7 +53,7 @@ def lambda_handler(event, context):
             }
             
     except Exception as e:
-        logger.error(f"Error in lambda_handler: {str(e)}")
+        print(f"Error in lambda_handler: {str(e)}")
         return {
             'statusCode': 500,
             'body': json.dumps({
@@ -87,5 +82,5 @@ def check_for_new_deals(scraper, db):
         return new_deals
         
     except Exception as e:
-        logger.error(f"Error checking for new deals: {str(e)}")
+        print(f"Error checking for new deals: {str(e)}")
         return [] 

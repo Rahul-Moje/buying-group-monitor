@@ -15,7 +15,6 @@ from config import (
     RETRY_DELAY
 )
 import hashlib
-import logging
 import traceback
 from notifier import DiscordNotifier
 
@@ -33,7 +32,6 @@ class BuyingGroupScraper:
         self.session = requests.Session()
         self.session.headers.update(DEFAULT_HEADERS)
         self.is_authenticated = False
-        self.logger = logging.getLogger('buying_group_scraper')
         
         # Configure retry strategy
         if Retry and HTTPAdapter:
@@ -48,50 +46,80 @@ class BuyingGroupScraper:
             self.session.mount("https://", retry_strategy)
     
     def _make_request_with_retry(self, method: str, url: str, **kwargs) -> Optional[requests.Response]:
-        """Make HTTP request with retry logic and proper error handling."""
-        from utils import make_request_with_retry
-        return make_request_with_retry(method, url, self.logger, **kwargs)
+        """Make HTTP request with retry logic and proper error handling using the same session."""
+        for attempt in range(MAX_RETRIES + 1):
+            try:
+                kwargs.setdefault('timeout', REQUEST_TIMEOUT)
+                response = getattr(self.session, method.lower())(url, **kwargs)
+                response.raise_for_status()
+                return response
+            except requests.exceptions.RequestException as e:
+                print(f"Request attempt {attempt + 1} failed: {e}")
+                if attempt < MAX_RETRIES:
+                    time.sleep(RETRY_DELAY * (2 ** attempt))  # Exponential backoff
+                else:
+                    print(f"All {MAX_RETRIES + 1} request attempts failed")
+                    return None
+        return None
     
     def login(self) -> bool:
         """Login to the buying group website."""
         try:
             if os.getenv('DEBUG', 'false').lower() == 'true':
-                self.logger.debug(f"Attempting to login with username: {USERNAME}")
-                self.logger.debug(f"Using password: {'*' * len(PASSWORD) if PASSWORD else '(empty)'}")
+                print(f"Attempting to login with username: {USERNAME}")
+                print(f"Using password: {'*' * len(PASSWORD) if PASSWORD else '(empty)'}")
             
             # First, get the login page to extract CSRF token
-            self.logger.info("Getting login page...")
+            print("Getting login page...")
             login_response = self._make_request_with_retry('GET', BUYING_GROUP_LOGIN_URL)
             
             if not login_response:
-                self.logger.error("Failed to get login page")
+                print("Failed to get login page")
                 return False
             
-            self.logger.debug(f"Login page status: {login_response.status_code}")
-            self.logger.debug(f"Login page URL: {login_response.url}")
+            if os.getenv('DEBUG', 'false').lower() == 'true':
+                print(f"Login page status: {login_response.status_code}")
+                print(f"Login page URL: {login_response.url}")
             
             soup = BeautifulSoup(login_response.text, 'html.parser')
             
             # Extract CSRF token
             csrf_token = None
+            
+            # Try multiple ways to find the CSRF token
             csrf_input = soup.find('input', {'name': '_token'})
+            print(f"CSRF input found: {csrf_input is not None}")
+            
             if csrf_input and hasattr(csrf_input, 'get') and not isinstance(csrf_input, str):
                 csrf_token = csrf_input.get('value')
-                if csrf_token:
-                    self.logger.debug(f"Found CSRF token: {csrf_token[:20]}...")
-                else:
-                    self.logger.warning("CSRF input found but no value attribute")
-            else:
-                self.logger.warning("Could not find CSRF token input field")
-                # Let's look for other possible token fields
-                all_inputs = [inp for inp in soup.find_all('input') if hasattr(inp, 'get') and not isinstance(inp, str)]
-                self.logger.debug(f"Found {len(all_inputs)} input fields:")
-                for inp in all_inputs:
-                    name = inp.get('name', 'no-name')
-                    self.logger.debug(f"  - {name}")
+                print(f"CSRF token value: {csrf_token[:20] if csrf_token else 'None'}...")
+                if not csrf_token:
+                    print("CSRF input found but no value attribute")
+            
+            # If not found, try looking for meta tag
+            if not csrf_token:
+                meta_csrf = soup.find('meta', {'name': 'csrf-token'})
+                if meta_csrf and hasattr(meta_csrf, 'get') and not isinstance(meta_csrf, str):
+                    csrf_token = meta_csrf.get('content')
+                    print(f"Found CSRF token in meta tag: {csrf_token[:20] if csrf_token else 'None'}...")
+            
+            # If still not found, try other common names
+            if not csrf_token:
+                for token_name in ['csrf_token', 'csrf', 'token', '_csrf_token']:
+                    token_input = soup.find('input', {'name': token_name})
+                    if token_input and hasattr(token_input, 'get') and not isinstance(token_input, str):
+                        csrf_token = token_input.get('value')
+                        print(f"Found CSRF token with name '{token_name}': {csrf_token[:20] if csrf_token else 'None'}...")
+                        break
             
             if not csrf_token:
-                self.logger.error("Could not find CSRF token")
+                print("Could not find CSRF token")
+                # Let's look for other possible token fields
+                all_inputs = [inp for inp in soup.find_all('input') if hasattr(inp, 'get') and not isinstance(inp, str)]
+                print(f"Found {len(all_inputs)} input fields:")
+                for inp in all_inputs:
+                    name = inp.get('name', 'no-name')
+                    print(f"  - {name}")
                 return False
             
             # Prepare login data
@@ -102,10 +130,16 @@ class BuyingGroupScraper:
                 'remember': 'on'
             }
             
-            self.logger.info("Submitting login form...")
+            print(f"Login data keys: {list(login_data.keys())}")
+            print(f"CSRF token length: {len(csrf_token) if csrf_token else 0}")
+            print(f"Username: {USERNAME}")
+            print(f"Password length: {len(PASSWORD) if PASSWORD else 0}")
+            
+            print("Submitting login form...")
             # Add Referer header to mimic browser behavior
             headers = dict(self.session.headers)
             headers['Referer'] = BUYING_GROUP_LOGIN_URL
+            print(f"Headers: {list(headers.keys())}")
             
             # Perform login as application/x-www-form-urlencoded
             login_response = self._make_request_with_retry(
@@ -117,39 +151,46 @@ class BuyingGroupScraper:
             )
             
             if not login_response:
-                self.logger.error("Failed to submit login form")
+                print("Failed to submit login form")
                 return False
             
-            self.logger.debug(f"Login response status: {login_response.status_code}")
-            self.logger.debug(f"Login response URL: {login_response.url}")
+            print(f"Login response status: {login_response.status_code}")
+            print(f"Login response URL: {login_response.url}")
+            print(f"Response headers: {dict(login_response.headers)}")
+            
+            # If we get a 419 error, let's see the response content
+            if login_response.status_code == 419:
+                print("Got 419 error - checking response content:")
+                print(f"Response text (first 500 chars): {login_response.text[:500]}")
+                return False
             
             # Check if login was successful
             if login_response.status_code == 200:
                 # Check if we're redirected to dashboard or still on login page
                 if 'dashboard' in login_response.url.lower() or 'login' not in login_response.url.lower():
                     self.is_authenticated = True
-                    self.logger.info("Successfully logged in to buying group")
+                    print("Successfully logged in to buying group")
                     return True
                 else:
-                    self.logger.warning("Login failed - still on login page")
+                    print("Login failed - still on login page")
                     # Let's check if there are any error messages
                     soup = BeautifulSoup(login_response.text, 'html.parser')
                     error_messages = soup.find_all(class_=re.compile(r'error|alert|danger'))
                     if error_messages:
-                        self.logger.warning("Error messages found:")
+                        print("Error messages found:")
                         for error in error_messages:
-                            self.logger.warning(f"  - {error.get_text(strip=True)}")
+                            print(f"  - {error.get_text(strip=True)}")
                     if os.getenv('DEBUG', 'false').lower() == 'true':
-                        self.logger.debug("--- Login Page HTML Start ---")
-                        self.logger.debug(login_response.text)
-                        self.logger.debug("--- Login Page HTML End ---")
+                        print("--- Login Page HTML Start ---")
+                        print(login_response.text)
+                        print("--- Login Page HTML End ---")
                     return False
             else:
-                self.logger.error(f"Login failed with status code: {login_response.status_code}")
+                print(f"Login failed with status code: {login_response.status_code}")
                 return False
                 
         except Exception as e:
-            self.logger.error(f"Error during login: {e}", exc_info=True)
+            print(f"Error during login: {e}")
             return False
     
     def get_deals(self) -> List[Dict]:
@@ -163,7 +204,7 @@ class BuyingGroupScraper:
             response = self._make_request_with_retry('GET', BUYING_GROUP_DASHBOARD_URL)
             
             if not response:
-                self.logger.error("Failed to get dashboard page")
+                print("Failed to get dashboard page")
                 return []
             
             soup = BeautifulSoup(response.text, 'html.parser')
@@ -177,11 +218,11 @@ class BuyingGroupScraper:
                 if deal:
                     deals.append(deal)
             
-            self.logger.info(f"Found {len(deals)} deals on the dashboard")
+            print(f"Found {len(deals)} deals on the dashboard")
             return deals
             
         except Exception as e:
-            self.logger.error(f"Error scraping deals: {e}", exc_info=True)
+            print(f"Error scraping deals: {e}")
             return []
     
     def _extract_deal_from_card(self, card) -> Optional[Dict]:
@@ -246,11 +287,11 @@ class BuyingGroupScraper:
             
             # Validate required fields
             if not title or title == "Unknown Title":
-                self.logger.warning("Deal card missing title")
+                print("Deal card missing title")
                 return None
             
             if not store or store == "Unknown Store":
-                self.logger.warning("Deal card missing store information")
+                print("Deal card missing store information")
                 return None
             
             # Sanitize link
@@ -269,7 +310,7 @@ class BuyingGroupScraper:
             }
             
         except Exception as e:
-            self.logger.error(f"Error extracting deal from card: {e}", exc_info=True)
+            print(f"Error extracting deal from card: {e}")
             return None
     
     def check_authentication(self) -> bool:

@@ -1,6 +1,5 @@
 import boto3
 import json
-import logging
 from typing import List, Dict, Optional
 from config import S3_BUCKET, S3_KEY
 from botocore.exceptions import ClientError
@@ -11,7 +10,6 @@ class DealDatabase:
     def __init__(self, bucket: str = S3_BUCKET, key: str = S3_KEY):
         self.bucket = bucket
         self.key = key
-        self.logger = logging.getLogger('deal_database')
         self.s3 = boto3.client('s3')
 
     def _load_deals(self) -> List[Dict]:
@@ -24,17 +22,17 @@ class DealDatabase:
         except ClientError as e:
             if e.response['Error']['Code'] == 'NoSuchKey':
                 return []
-            self.logger.error(f"Error loading deals from S3: {e}")
+            print(f"Error loading deals from S3: {e}")
             return []
         except Exception as e:
-            self.logger.error(f"Error loading deals from S3: {e}")
+            print(f"Error loading deals from S3: {e}")
             return []
 
     def _save_deals(self, deals: List[Dict]):
         try:
             self.s3.put_object(Bucket=self.bucket, Key=self.key, Body=json.dumps(deals))
         except Exception as e:
-            self.logger.error(f"Error saving deals to S3: {e}")
+            print(f"Error saving deals to S3: {e}")
 
     def get_all_deals(self) -> List[Dict]:
         return self._load_deals()
@@ -103,7 +101,7 @@ class DealDatabase:
             }
             
         except Exception as e:
-            self.logger.error(f"Error getting database stats: {e}", exc_info=True)
+            print(f"Error getting database stats: {e}")
             return {
                 'total_deals': 0,
                 'active_deals': 0,

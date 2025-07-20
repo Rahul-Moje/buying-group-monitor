@@ -1,5 +1,4 @@
 import requests
-import logging
 from typing import List, Dict, Optional
 from config import DISCORD_WEBHOOK_URL, REQUEST_TIMEOUT, MAX_RETRIES, RETRY_DELAY
 import time
@@ -7,19 +6,18 @@ import time
 class DiscordNotifier:
     def __init__(self, webhook_url: str = DISCORD_WEBHOOK_URL or ""):
         self.webhook_url = webhook_url
-        self.logger = logging.getLogger('discord_notifier')
     
     def _make_request_with_retry(self, url: str, json_data: dict) -> Optional[requests.Response]:
         """Make HTTP request with retry logic and proper error handling."""
         from utils import make_request_with_retry
-        return make_request_with_retry('POST', url, self.logger, json=json_data)
+        return make_request_with_retry('POST', url, None, json=json_data)
     
     def _validate_deal_data(self, deal: Dict) -> bool:
         """Validate deal data before sending to Discord."""
         required_fields = ['title', 'store', 'price', 'max_quantity']
         for field in required_fields:
             if field not in deal or deal[field] is None:
-                self.logger.warning(f"Deal missing required field: {field}")
+                print(f"Deal missing required field: {field}")
                 return False
         return True
     
@@ -45,11 +43,11 @@ class DiscordNotifier:
     def send_new_deals_notification(self, deals: List[Dict]) -> bool:
         """Send notification about new deals."""
         if not self.webhook_url:
-            self.logger.warning("No Discord webhook URL configured - notifications disabled")
+            print("No Discord webhook URL configured - notifications disabled")
             return False
         
         if not deals:
-            self.logger.info("No deals to notify about")
+            print("No deals to notify about")
             return True
         
         try:
@@ -59,10 +57,10 @@ class DiscordNotifier:
                 if self._validate_deal_data(deal):
                     valid_deals.append(self._sanitize_deal_data(deal))
                 else:
-                    self.logger.warning(f"Skipping invalid deal: {deal.get('title', 'Unknown')}")
+                    print(f"Skipping invalid deal: {deal.get('title', 'Unknown')}")
             
             if not valid_deals:
-                self.logger.warning("No valid deals to send notification for")
+                print("No valid deals to send notification for")
                 return False
             
             # Create embed for Discord
@@ -97,24 +95,24 @@ class DiscordNotifier:
             
             response = self._make_request_with_retry(self.webhook_url, payload)
             if response:
-                self.logger.info(f"Successfully sent notification for {len(valid_deals)} new deals")
+                print(f"Successfully sent notification for {len(valid_deals)} new deals")
                 return True
             else:
-                self.logger.error("Failed to send Discord notification after all retries")
+                print("Failed to send Discord notification after all retries")
                 return False
             
         except Exception as e:
-            self.logger.error(f"Error sending Discord notification: {e}", exc_info=True)
+            print(f"Error sending Discord notification: {e}")
             return False
     
     def send_deal_update_notification(self, deal: Dict, old_quantity: int, new_quantity: int) -> bool:
         """Send notification about deal quantity updates."""
         if not self.webhook_url:
-            self.logger.warning("No Discord webhook URL configured - notifications disabled")
+            print("No Discord webhook URL configured - notifications disabled")
             return False
         
         if not self._validate_deal_data(deal):
-            self.logger.warning("Invalid deal data for update notification")
+            print("Invalid deal data for update notification")
             return False
         
         try:
@@ -162,14 +160,14 @@ class DiscordNotifier:
             
             response = self._make_request_with_retry(self.webhook_url, payload)
             if response:
-                self.logger.info(f"Successfully sent quantity update notification for {sanitized_deal['title']}")
+                print(f"Successfully sent quantity update notification for {sanitized_deal['title']}")
                 return True
             else:
-                self.logger.error("Failed to send quantity update notification after all retries")
+                print("Failed to send quantity update notification after all retries")
                 return False
             
         except Exception as e:
-            self.logger.error(f"Error sending quantity update notification: {e}", exc_info=True)
+            print(f"Error sending quantity update notification: {e}")
             return False
     
     def send_error_notification(self, error_message: str) -> bool:
